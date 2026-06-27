@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ernestns/daily-docs/internal/activation"
 	"github.com/ernestns/daily-docs/internal/db"
 	"github.com/ernestns/daily-docs/internal/pipeline"
 	"github.com/ernestns/daily-docs/internal/reading"
@@ -720,6 +721,28 @@ func runCommand(ctx context.Context, args []string) error {
 		}
 
 		log.Printf("processed submission id=%d run_id=%d discovered=%d crawled=%d eligible=%d rejected=%d failed=%d", result.SubmissionID, result.PipelineRunID, result.DiscoveredCount, result.CrawledCount, result.EligibleCount, result.RejectedCount, result.FailureCount)
+		return nil
+	case "activate-candidates":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: dailydocs activate-candidates submission-id")
+		}
+		submissionID, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil || submissionID < 1 {
+			return fmt.Errorf("submission-id must be a positive integer")
+		}
+
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		result, err := activation.ActivateCandidates(ctx, conn, submissionID)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("activated candidates submission_id=%d topic=%s pages=%d", result.SubmissionID, result.TopicSlug, result.Activated)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
