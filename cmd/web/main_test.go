@@ -28,11 +28,43 @@ func TestHomePageListsTopics(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
-	if !strings.Contains(response.Body.String(), `value="sqlite"`) {
-		t.Fatalf("expected sqlite topic option in home page:\n%s", response.Body.String())
+	if !strings.Contains(response.Body.String(), `href="/sqlite"`) {
+		t.Fatalf("expected sqlite topic link in home page:\n%s", response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), `>Submit documentation</a>`) {
 		t.Fatalf("did not expect static submit documentation link on home page:\n%s", response.Body.String())
+	}
+}
+
+func TestHomePageRendersTopicCombobox(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	importWebTopic(t, ctx, conn, "rust", "Rust")
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		`role="combobox"`,
+		`aria-autocomplete="list"`,
+		`aria-controls="topic-results"`,
+		`role="listbox"`,
+		`id="topic-results"`,
+		`ArrowDown`,
+		`aria-activedescendant`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in home page:\n%s", expected, body)
+		}
+	}
+	if strings.Contains(body, "<datalist") {
+		t.Fatalf("did not expect datalist after combobox replacement:\n%s", body)
 	}
 }
 
@@ -151,6 +183,29 @@ func TestTopicSearchReturnsJSON(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(body, `"slug":"sqlite"`) {
 		t.Fatalf("expected sqlite in search response: %s", body)
+	}
+	if strings.Contains(body, `"slug":"go"`) {
+		t.Fatalf("did not expect go in filtered search response: %s", body)
+	}
+}
+
+func TestTopicSearchReturnsCaseInsensitivePartialMatches(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	importWebTopic(t, ctx, conn, "rust", "Rust")
+	importWebTopic(t, ctx, conn, "go", "Go")
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/topics/search?q=Ru", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"slug":"rust"`) {
+		t.Fatalf("expected rust in search response: %s", body)
 	}
 	if strings.Contains(body, `"slug":"go"`) {
 		t.Fatalf("did not expect go in filtered search response: %s", body)

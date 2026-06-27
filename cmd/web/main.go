@@ -432,8 +432,14 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
       max-width: 32rem;
       margin-bottom: 0.75rem;
     }
-    input {
+    .topic-lookup {
+      position: relative;
       flex: 1;
+      min-width: 0;
+    }
+    input {
+      width: 100%;
+      box-sizing: border-box;
       min-width: 0;
       padding: 0.75rem 0.875rem;
       border: 1px solid #cbd2d9;
@@ -466,6 +472,34 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
       color: #52606d;
       font-size: 0.95rem;
     }
+    .topic-results {
+      position: absolute;
+      z-index: 2;
+      top: calc(100% + 0.25rem);
+      right: 0;
+      left: 0;
+      display: grid;
+      gap: 0;
+      margin: 0;
+      padding: 0.25rem;
+      list-style: none;
+      border: 1px solid #cbd2d9;
+      border-radius: 6px;
+      background: #ffffff;
+      box-shadow: 0 8px 24px rgba(31, 41, 51, 0.12);
+    }
+    .topic-results[hidden] {
+      display: none;
+    }
+    .topic-option {
+      padding: 0.65rem 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .topic-option[aria-selected="true"] {
+      color: #ffffff;
+      background: #1f2933;
+    }
   </style>
 </head>
 <body>
@@ -474,10 +508,20 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
       <h1>DailyDocs</h1>
       <p>One documentation link per topic per day.</p>
       <form method="get" action="/read" id="topic-form">
-        <input name="topic" id="topic-input" list="topics" autocomplete="off" placeholder="sqlite" aria-label="Topic">
-        <datalist id="topics">
-          {{range .Topics}}<option value="{{.Slug}}">{{.Name}}</option>{{end}}
-        </datalist>
+        <div class="topic-lookup">
+          <input
+            name="topic"
+            id="topic-input"
+            autocomplete="off"
+            placeholder="sqlite"
+            aria-label="Topic"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="topic-results"
+          >
+          <ul class="topic-results" id="topic-results" role="listbox" hidden></ul>
+        </div>
         <button type="submit" id="topic-button">View Reading</button>
       </form>
       <p class="lookup-status" id="topic-status"></p>
@@ -493,9 +537,74 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
     const input = document.getElementById("topic-input");
     const button = document.getElementById("topic-button");
     const status = document.getElementById("topic-status");
+    const results = document.getElementById("topic-results");
     let controller = null;
+    let matches = [];
+    let activeIndex = -1;
 
-    function setLookupState(matches) {
+    function exactMatch() {
+      const value = input.value.trim().toLowerCase();
+      return matches.find((topic) => topic.slug.toLowerCase() === value || topic.name.toLowerCase() === value);
+    }
+
+    function closeResults() {
+      results.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+      activeIndex = -1;
+      updateActiveOption();
+    }
+
+    function openResults() {
+      if (matches.length === 0) return;
+      results.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    }
+
+    function updateActiveOption() {
+      Array.from(results.children).forEach((option, index) => {
+        const selected = index === activeIndex;
+        option.setAttribute("aria-selected", selected ? "true" : "false");
+        if (selected) {
+          input.setAttribute("aria-activedescendant", option.id);
+        }
+      });
+      if (activeIndex < 0) {
+        input.removeAttribute("aria-activedescendant");
+      }
+    }
+
+    function selectMatch(index) {
+      const topic = matches[index];
+      if (!topic) return;
+      input.value = topic.name;
+      matches = [topic];
+      closeResults();
+      setLookupState();
+    }
+
+    function renderResults() {
+      results.innerHTML = "";
+      matches.forEach((topic, index) => {
+        const option = document.createElement("li");
+        option.id = "topic-option-" + index;
+        option.className = "topic-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", "false");
+        option.textContent = topic.name;
+        option.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          selectMatch(index);
+        });
+        results.appendChild(option);
+      });
+      activeIndex = -1;
+      updateActiveOption();
+      if (matches.length > 0) openResults();
+      else closeResults();
+    }
+
+    function setLookupState() {
       const value = input.value.trim().toLowerCase();
       if (!value) {
         button.textContent = "View Reading";
@@ -503,22 +612,23 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
         return;
       }
 
-      const exact = matches.find((topic) => topic.slug.toLowerCase() === value || topic.name.toLowerCase() === value);
-      if (exact) {
+      if (exactMatch()) {
         button.textContent = "View Reading";
         status.textContent = "";
         return;
       }
 
       button.textContent = "Submit Documentation";
-      status.textContent = "No matching topic found.";
+      status.textContent = matches.length > 0 ? "Select a topic from the list." : "No matching topic found.";
     }
 
     input.addEventListener("input", async () => {
       const value = input.value.trim();
       if (controller) controller.abort();
       if (!value) {
-        setLookupState([]);
+        matches = [];
+        renderResults();
+        setLookupState();
         return;
       }
 
@@ -526,10 +636,34 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
       try {
         const response = await fetch("/topics/search?q=" + encodeURIComponent(value), { signal: controller.signal });
         if (!response.ok) return;
-        setLookupState(await response.json());
+        matches = await response.json();
+        renderResults();
+        setLookupState();
       } catch (error) {
         if (error.name !== "AbortError") status.textContent = "";
       }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (results.hidden) openResults();
+        activeIndex = Math.min(activeIndex + 1, matches.length - 1);
+        updateActiveOption();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, 0);
+        updateActiveOption();
+      } else if (event.key === "Enter" && activeIndex >= 0 && !results.hidden) {
+        event.preventDefault();
+        selectMatch(activeIndex);
+      } else if (event.key === "Escape") {
+        closeResults();
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      window.setTimeout(closeResults, 100);
     });
   </script>
 </body>
