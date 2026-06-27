@@ -114,6 +114,47 @@ func TestTopicSearchReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestTopicsPageListsAllActiveTopics(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	importWebTopic(t, ctx, conn, "sqlite", "SQLite")
+	importWebTopic(t, ctx, conn, "go", "Go")
+	importWebTopic(t, ctx, conn, "docker", "Docker")
+
+	if _, err := conn.ExecContext(ctx, "UPDATE topics SET status = 'disabled' WHERE slug = 'docker'"); err != nil {
+		t.Fatalf("disable topic: %v", err)
+	}
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/topics", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `href="/go"`) {
+		t.Fatalf("expected go topic link:\n%s", body)
+	}
+	if !strings.Contains(body, `href="/sqlite"`) {
+		t.Fatalf("expected sqlite topic link:\n%s", body)
+	}
+	if strings.Contains(body, `href="/docker"`) {
+		t.Fatalf("did not expect disabled docker topic:\n%s", body)
+	}
+}
+
+func TestTopicsPageRequiresGet(t *testing.T) {
+	handler := newTestHandler(nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/topics", nil))
+
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", response.Code)
+	}
+}
+
 func TestSubmissionsPageIsNoindexed(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
@@ -222,6 +263,7 @@ func newTestHandler(conn *sql.DB) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/submissions", app.submissionsHandler)
+	mux.HandleFunc("/topics", app.topicsHandler)
 	mux.HandleFunc("/topics/search", app.searchTopicsHandler)
 	mux.HandleFunc("/read", app.generateReadingHandler)
 	mux.HandleFunc("/", app.routeHandler)

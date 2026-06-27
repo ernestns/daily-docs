@@ -67,6 +67,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/submissions", app.submissionsHandler)
+	mux.HandleFunc("/topics", app.topicsHandler)
 	mux.HandleFunc("/topics/search", app.searchTopicsHandler)
 	mux.HandleFunc("/read", app.generateReadingHandler)
 	mux.HandleFunc("/", app.routeHandler)
@@ -145,7 +146,7 @@ func (a app) routeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a app) homeHandler(w http.ResponseWriter, r *http.Request) {
-	topics, err := listTopics(r.Context(), a.db, "")
+	topics, err := listTopics(r.Context(), a.db, "", 10)
 	if err != nil {
 		log.Printf("list topics failed: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -153,6 +154,25 @@ func (a app) homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderTemplate(w, homeTemplate, struct {
+		Topics []topicOption
+	}{Topics: topics})
+}
+
+func (a app) topicsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	topics, err := listTopics(r.Context(), a.db, "", 0)
+	if err != nil {
+		log.Printf("list all topics failed: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	renderTemplate(w, topicsTemplate, struct {
 		Topics []topicOption
 	}{Topics: topics})
 }
@@ -239,7 +259,7 @@ func (a app) searchTopicsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	topics, err := listTopics(r.Context(), a.db, r.URL.Query().Get("q"))
+	topics, err := listTopics(r.Context(), a.db, r.URL.Query().Get("q"), 10)
 	if err != nil {
 		log.Printf("search topics failed: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -274,7 +294,7 @@ type topicOption struct {
 	Name string `json:"name"`
 }
 
-func listTopics(ctx context.Context, conn *sql.DB, query string) ([]topicOption, error) {
+func listTopics(ctx context.Context, conn *sql.DB, query string, limit int) ([]topicOption, error) {
 	query = strings.TrimSpace(strings.ToLower(query))
 
 	sqlQuery := `
@@ -288,7 +308,10 @@ func listTopics(ctx context.Context, conn *sql.DB, query string) ([]topicOption,
 		like := "%" + query + "%"
 		args = append(args, like, like)
 	}
-	sqlQuery += " ORDER BY name ASC LIMIT 10"
+	sqlQuery += " ORDER BY name ASC"
+	if limit > 0 {
+		sqlQuery += fmt.Sprintf(" LIMIT %d", limit)
+	}
 
 	rows, err := conn.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
@@ -418,8 +441,65 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
         {{range .Topics}}<li><a href="/{{.Slug}}">{{.Name}}</a></li>{{end}}
       </ul>
       {{end}}
-      <p><a href="/submissions">Submit documentation</a></p>
+      <p><a href="/topics">All topics</a> · <a href="/submissions">Submit documentation</a></p>
     </section>
+  </main>
+</body>
+</html>
+`))
+
+var topicsTemplate = template.Must(template.New("topics").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Topics - DailyDocs</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2933;
+      background: #f7f8fa;
+    }
+    main {
+      width: min(42rem, 100%);
+      margin: 0 auto;
+      padding: 2rem;
+      box-sizing: border-box;
+    }
+    h1 {
+      margin: 0 0 1rem;
+      font-size: clamp(2rem, 7vw, 4rem);
+      line-height: 1;
+    }
+    ul {
+      margin: 0 0 1.5rem;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.65rem;
+    }
+    a {
+      color: #1f2933;
+    }
+    p {
+      margin: 0;
+      color: #52606d;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Topics</h1>
+    {{if .Topics}}
+    <ul>
+      {{range .Topics}}<li><a href="/{{.Slug}}">{{.Name}}</a></li>{{end}}
+    </ul>
+    {{else}}
+    <p>No topics yet.</p>
+    {{end}}
+    <p><a href="/">Home</a> · <a href="/submissions">Submit documentation</a></p>
   </main>
 </body>
 </html>
@@ -645,7 +725,7 @@ var readingTemplate = template.Must(template.New("reading").Parse(`<!doctype htm
         {{if .EstimatedMinutes}}<br>{{.EstimatedMinutes}} min{{end}}
       </p>
       <a class="button" href="{{.URL}}">Read</a>
-      <nav><a href="/">All topics</a></nav>
+      <nav><a href="/topics">All topics</a></nav>
     </article>
   </main>
 </body>
