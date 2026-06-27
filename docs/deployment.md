@@ -148,6 +148,14 @@ Import a file:
 DB_PATH=data/dailydocs.sqlite ./bin/dailydocs import-file path/to/sqlite.yaml
 ```
 
+## Validate Links
+
+Check active documentation links and disable links after repeated failures:
+
+```sh
+DB_PATH=data/dailydocs.sqlite ./bin/dailydocs validate-links
+```
+
 ## Systemd
 
 Example service:

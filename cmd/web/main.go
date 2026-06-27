@@ -19,6 +19,7 @@ import (
 	"github.com/ernestns/daily-docs/internal/db"
 	"github.com/ernestns/daily-docs/internal/reading"
 	"github.com/ernestns/daily-docs/internal/seed"
+	"github.com/ernestns/daily-docs/internal/validator"
 )
 
 var topicPathPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -460,6 +461,24 @@ func runCommand(ctx context.Context, args []string) error {
 		}
 
 		log.Printf("imported topic=%s pages_found=%d pages_imported=%d", result.TopicSlug, result.PagesFound, result.PagesImported)
+		return nil
+	case "validate-links":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: dailydocs validate-links")
+		}
+
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		result, err := validator.ValidateLinks(ctx, conn, nil, validator.DefaultFailureThreshold)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("validated links checked=%d healthy=%d failed=%d disabled=%d", result.Checked, result.Healthy, result.Failed, result.Disabled)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
