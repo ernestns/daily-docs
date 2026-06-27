@@ -156,6 +156,32 @@ Check active documentation links and disable links after repeated failures:
 DB_PATH=data/dailydocs.sqlite ./bin/dailydocs validate-links
 ```
 
+## Backup SQLite
+
+Create a compressed backup using SQLite's backup mechanism:
+
+```sh
+DB_PATH=/opt/dailydocs/data/dailydocs.sqlite BACKUP_DIR=/opt/dailydocs/backups ./scripts/backup-sqlite.sh
+```
+
+The script prints the backup path.
+
+## Restore SQLite
+
+Restore requires an explicit confirmation environment variable because it replaces the database file:
+
+```sh
+RESTORE_CONFIRM=replace-dailydocs-db DB_PATH=/opt/dailydocs/data/dailydocs.sqlite ./scripts/restore-sqlite.sh /opt/dailydocs/backups/dailydocs-YYYYMMDDTHHMMSSZ.sqlite.gz
+```
+
+The restore script:
+
+- verifies the backup with `PRAGMA integrity_check`
+- stops `dailydocs.service` if it exists
+- copies the current database to a `.pre-restore-*` file
+- installs the restored database
+- starts `dailydocs.service` if it exists
+
 ## Systemd
 
 Example service:

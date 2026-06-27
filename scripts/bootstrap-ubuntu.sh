@@ -31,7 +31,7 @@ fi
 
 echo "==> Installing system packages"
 apt-get update
-env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git golang-go caddy sudo
+env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git golang-go caddy sudo sqlite3
 
 echo "==> Creating application user"
 if ! getent group "$APP_GROUP" >/dev/null 2>&1; then
@@ -80,7 +80,7 @@ fi
 chown -R "$DEPLOY_USER:$DEPLOY_GROUP" "$DEPLOY_REPO_DIR"
 
 echo "==> Preparing application directory"
-mkdir -p "$APP_DIR/bin" "$DATA_DIR"
+mkdir -p "$APP_DIR/bin" "$DATA_DIR" "$APP_DIR/backups"
 chown -R "$APP_USER:$APP_GROUP" "$DATA_DIR"
 
 echo "==> Building application"
