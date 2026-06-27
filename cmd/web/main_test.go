@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,6 +114,105 @@ func TestTopicSearchReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestSubmissionsPageIsNoindexed(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/submissions", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `<meta name="robots" content="noindex">`) {
+		t.Fatalf("expected noindex meta tag:\n%s", body)
+	}
+	if !strings.Contains(body, "Documentation URL") {
+		t.Fatalf("expected submission form:\n%s", body)
+	}
+}
+
+func TestCreateSubmissionRedirectsAndStoresSubmission(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	form := url.Values{}
+	form.Set("url", "https://SQLite.org/docs.html#top")
+	form.Set("topic", "SQLite")
+
+	handler := newTestHandler(conn)
+	request := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.RemoteAddr = "203.0.113.1:12345"
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); location != "/submissions" {
+		t.Fatalf("expected redirect to /submissions, got %q", location)
+	}
+
+	var normalizedURL, sourceHost, suggestedTopic string
+	var requestCount int
+	if err := conn.QueryRowContext(ctx, `
+		SELECT normalized_url, source_host, suggested_topic, request_count
+		FROM documentation_submissions
+	`).Scan(&normalizedURL, &sourceHost, &suggestedTopic, &requestCount); err != nil {
+		t.Fatalf("read submission: %v", err)
+	}
+	if normalizedURL != "https://sqlite.org/docs.html" {
+		t.Fatalf("expected normalized url, got %q", normalizedURL)
+	}
+	if sourceHost != "sqlite.org" {
+		t.Fatalf("expected source host sqlite.org, got %q", sourceHost)
+	}
+	if suggestedTopic != "SQLite" {
+		t.Fatalf("expected suggested topic SQLite, got %q", suggestedTopic)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected request count 1, got %d", requestCount)
+	}
+}
+
+func TestSubmissionsPageShowsSafePublicFields(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	form := url.Values{}
+	form.Set("url", "https://go.dev/doc/")
+	form.Set("topic", "Go")
+
+	handler := newTestHandler(conn)
+	request := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/submissions", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "go.dev") {
+		t.Fatalf("expected source host in queue:\n%s", body)
+	}
+	if !strings.Contains(body, "Go") {
+		t.Fatalf("expected suggested topic in queue:\n%s", body)
+	}
+	if strings.Contains(body, "https://go.dev/doc") {
+		t.Fatalf("did not expect raw submitted URL in public queue:\n%s", body)
+	}
+}
+
 func newTestHandler(conn *sql.DB) http.Handler {
 	app := app{
 		db:  conn,
@@ -121,6 +221,7 @@ func newTestHandler(conn *sql.DB) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/submissions", app.submissionsHandler)
 	mux.HandleFunc("/topics/search", app.searchTopicsHandler)
 	mux.HandleFunc("/read", app.generateReadingHandler)
 	mux.HandleFunc("/", app.routeHandler)

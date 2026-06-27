@@ -17,7 +17,7 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	}
 	defer conn.Close()
 
-	for _, table := range []string{"topics", "pages", "daily_readings", "imports", "schema_migrations"} {
+	for _, table := range []string{"topics", "pages", "daily_readings", "imports", "schema_migrations", "documentation_submissions"} {
 		if !tableExists(ctx, t, conn, table) {
 			t.Fatalf("expected table %q to exist", table)
 		}
@@ -42,8 +42,12 @@ func TestApplyMigrationsIsIdempotent(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("expected 2 migration records, got %d", count)
+	files, err := migrationFiles()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	if count != len(files) {
+		t.Fatalf("expected %d migration records, got %d", len(files), count)
 	}
 }
 

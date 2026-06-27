@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"github.com/ernestns/daily-docs/internal/db"
 	"github.com/ernestns/daily-docs/internal/reading"
 	"github.com/ernestns/daily-docs/internal/seed"
+	"github.com/ernestns/daily-docs/internal/submission"
 	"github.com/ernestns/daily-docs/internal/validator"
 )
 
@@ -60,6 +62,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/submissions", app.submissionsHandler)
 	mux.HandleFunc("/topics/search", app.searchTopicsHandler)
 	mux.HandleFunc("/read", app.generateReadingHandler)
 	mux.HandleFunc("/", app.routeHandler)
@@ -148,6 +151,65 @@ func (a app) homeHandler(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, homeTemplate, struct {
 		Topics []topicOption
 	}{Topics: topics})
+}
+
+func (a app) submissionsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.submissionsPageHandler(w, r, "")
+	case http.MethodPost:
+		a.createSubmissionHandler(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a app) submissionsPageHandler(w http.ResponseWriter, r *http.Request, message string) {
+	submissions, err := submission.ListPublic(r.Context(), a.db, 50)
+	if err != nil {
+		log.Printf("list submissions failed: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	renderTemplate(w, submissionsTemplate, struct {
+		Message     string
+		Submissions []submission.Submission
+	}{
+		Message:     message,
+		Submissions: submissions,
+	})
+}
+
+func (a app) createSubmissionHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(r.Form.Get("website")) != "" {
+		http.Redirect(w, r, "/submissions", http.StatusSeeOther)
+		return
+	}
+
+	_, err := submission.Create(r.Context(), a.db, submission.CreateInput{
+		URL:            r.Form.Get("url"),
+		SuggestedTopic: r.Form.Get("topic"),
+		SubmitterIP:    clientIP(r),
+		IPHashSalt:     os.Getenv("IP_HASH_SALT"),
+	})
+	if err != nil {
+		if errors.Is(err, submission.ErrInvalidURL) {
+			http.Error(w, "documentation URL must use http or https", http.StatusBadRequest)
+			return
+		}
+		log.Printf("create submission failed: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/submissions", http.StatusSeeOther)
 }
 
 func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +313,18 @@ func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any) {
 	}
 }
 
+func clientIP(r *http.Request) string {
+	if forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwardedFor != "" {
+		ip, _, _ := strings.Cut(forwardedFor, ",")
+		return strings.TrimSpace(ip)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return strings.TrimSpace(host)
+}
+
 var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -340,7 +414,150 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!doctype html>
         {{range .Topics}}<li><a href="/{{.Slug}}">{{.Name}}</a></li>{{end}}
       </ul>
       {{end}}
+      <p><a href="/submissions">Submit documentation</a></p>
     </section>
+  </main>
+</body>
+</html>
+`))
+
+var submissionsTemplate = template.Must(template.New("submissions").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Submissions - DailyDocs</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2933;
+      background: #f7f8fa;
+    }
+    main {
+      width: min(48rem, 100%);
+      margin: 0 auto;
+      padding: 2rem;
+      box-sizing: border-box;
+    }
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: clamp(2rem, 7vw, 4rem);
+      line-height: 1;
+    }
+    p {
+      margin: 0 0 1.5rem;
+      color: #52606d;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+    form {
+      display: grid;
+      gap: 0.75rem;
+      margin: 0 0 2rem;
+      max-width: 36rem;
+    }
+    label {
+      display: grid;
+      gap: 0.35rem;
+      color: #52606d;
+      font-size: 0.95rem;
+    }
+    input {
+      min-width: 0;
+      padding: 0.75rem 0.875rem;
+      border: 1px solid #cbd2d9;
+      border-radius: 6px;
+      font: inherit;
+      background: #ffffff;
+      color: #1f2933;
+    }
+    .honeypot {
+      position: absolute;
+      left: -10000px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+    button {
+      justify-self: start;
+      padding: 0.75rem 1rem;
+      border: 0;
+      border-radius: 6px;
+      font: inherit;
+      color: #ffffff;
+      background: #1f2933;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #ffffff;
+    }
+    th, td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #e4e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: #52606d;
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+    a {
+      color: #1f2933;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Documentation submissions</h1>
+    <p>Submit a documentation homepage for a topic that is missing.</p>
+    <form method="post" action="/submissions">
+      <label>
+        Documentation URL
+        <input name="url" type="url" autocomplete="off" placeholder="https://sqlite.org/docs.html" required>
+      </label>
+      <label>
+        Topic
+        <input name="topic" autocomplete="off" placeholder="SQLite">
+      </label>
+      <label class="honeypot">
+        Website
+        <input name="website" autocomplete="off" tabindex="-1">
+      </label>
+      <button type="submit">Submit</button>
+    </form>
+
+    {{if .Submissions}}
+    <table>
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Topic</th>
+          <th>Status</th>
+          <th>Requests</th>
+          <th>Last submitted</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Submissions}}
+        <tr>
+          <td>{{.SourceHost}}</td>
+          <td>{{if .SuggestedTopic}}{{.SuggestedTopic}}{{else}}-{{end}}</td>
+          <td>{{.Status}}</td>
+          <td>{{.RequestCount}}</td>
+          <td>{{.LastSubmitted}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p>No submissions yet.</p>
+    {{end}}
+    <p><a href="/">All topics</a></p>
   </main>
 </body>
 </html>
