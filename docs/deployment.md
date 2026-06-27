@@ -11,16 +11,30 @@ apt update
 apt install -y git
 git clone https://github.com/ernestns/daily-docs.git
 cd daily-docs
-./bootstrap.sh
+DEPLOY_SSH_PUBLIC_KEY='ssh-ed25519 ...' ./bootstrap.sh
 ```
 
 Run the bootstrap script as `root`. The application service itself runs as the `dailydocs` system user.
+Routine deploys should use the `deploy` user created by the bootstrap script.
+
+If you saved the key in a shell variable first, export it before running bootstrap:
+
+```sh
+export DEPLOY_SSH_PUBLIC_KEY
+./bootstrap.sh
+```
+
+A value can appear in `echo "$DEPLOY_SSH_PUBLIC_KEY"` without being visible to
+`./bootstrap.sh` unless it is exported or passed inline as shown above.
 
 The script defaults to:
 
 ```text
 domain: dailydocs.dev
 app user: dailydocs
+deploy user: deploy
+deploy repo: /home/deploy/daily-docs
+deploy helper: /usr/local/bin/dailydocs-install
 app dir: /opt/dailydocs
 database: /opt/dailydocs/data/dailydocs.sqlite
 app address: 127.0.0.1:8080
@@ -35,6 +49,18 @@ Override defaults with environment variables:
 DOMAIN=example.com APP_ADDR=127.0.0.1:8081 ./bootstrap.sh
 ```
 
+`DEPLOY_SSH_PUBLIC_KEY` should be the public key from your local machine, for example the
+contents of `~/.ssh/id_ed25519.pub`. If it is omitted, bootstrap still creates the
+`deploy` user but does not install an SSH key. Root SSH is not changed.
+
+The bootstrap script also installs a root-owned deploy helper and a narrow sudoers rule:
+
+```text
+deploy ALL=(root) NOPASSWD: /usr/local/bin/dailydocs-install
+```
+
+That helper is the only passwordless root command required for routine deploys.
+
 ## Build
 
 ```sh
@@ -45,6 +71,41 @@ The build output is:
 
 ```text
 bin/dailydocs
+```
+
+## Deploy Existing VPS
+
+After the VPS has been bootstrapped once, deploy from your local machine:
+
+```sh
+./scripts/deploy-remote.sh
+```
+
+The script defaults to:
+
+```text
+ssh host: remote
+repo dir: ~/daily-docs
+branch: main
+service: dailydocs.service
+deploy helper: /usr/local/bin/dailydocs-install
+health check: http://127.0.0.1:8080/health
+```
+
+Override defaults with environment variables:
+
+```sh
+REMOTE=dailydocs-vps REPO_DIR=/home/deploy/daily-docs BRANCH=main ./scripts/deploy-remote.sh
+```
+
+The deploy script runs the usual manual sequence on the VPS:
+
+```text
+git fetch
+git pull --ff-only
+./scripts/build.sh
+sudo /usr/local/bin/dailydocs-install
+curl /health
 ```
 
 ## Run Locally
