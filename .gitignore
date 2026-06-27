@@ -1,0 +1,27 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# SQLite databases and local data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+/data/
+
+# Build outputs
+/bin/
+/dist/
+
+# Logs and temporary files
+*.log
+/logs/
+/tmp/
+
+# Backups
+/backups/
+
+# OS/editor noise
+.DS_Store
+*.swp
