@@ -19,7 +19,7 @@ Implications:
 
 Decision: exclude the `Another` feature from MVP.
 
-Reason: the MVP promise is one carefully selected reading per topic per day. Offering alternate readings adds product and URL complexity without strengthening the core habit loop.
+Reason: the MVP supports one reading per topic per day. Offering alternate readings adds product and URL complexity without strengthening the core behavior.
 
 ### Support Single-Topic Reading URLs
 
@@ -39,17 +39,17 @@ Example:
 
 Reason: single-topic URLs make the product easier to understand and implement. The topic-only URL is the common bookmark for today's reading, while the dated URL gives DailyDocs a stable historical address. The daily assignment model is naturally keyed by one topic and one date, and multi-topic bundles can be deferred until there is evidence users need them.
 
-### Start With Manual Curation
+### Start With Reviewed Seed Files
 
-Decision: use manually curated seed files before building automated discovery.
+Decision: use reviewed seed files before building automated discovery.
 
-Reason: content quality is the product. Manual curation gets the product to a trustworthy MVP faster than investing early in scraping heuristics.
+Reason: reviewed seed files define the initial link set without depending on scraping heuristics.
 
 ### Build Validator Before Full Importer Automation
 
 Decision: implement link validation before a broad automated importer.
 
-Reason: broken recommendations are more damaging than a smaller topic catalog. Link health is part of product trust.
+Reason: broken links are worse than a smaller topic catalog.
 
 ## Open Decisions
 
@@ -57,16 +57,16 @@ Reason: broken recommendations are more damaging than a smaller topic catalog. L
 
 Question: should DailyDocs use UTC or a configured product timezone for the meaning of "today"?
 
-Recommendation: use UTC for MVP unless the product intentionally wants a local morning-routine boundary.
+Recommendation: use UTC for MVP unless the product needs a configured local date boundary.
 
 ### Initial Topic Set
 
 Question: which 5-10 topics should launch first?
 
-Recommendation: choose technologies with strong official documentation and broad developer interest, such as Go, SQLite, Docker, PostgreSQL, Git, Python, TypeScript, Kubernetes, Redis, and HTTP.
+Recommendation: choose technologies with official documentation and common developer use, such as Go, SQLite, Docker, PostgreSQL, Git, Python, TypeScript, Kubernetes, Redis, and HTTP.
 
 ### Import Review Format
 
-Question: should curated seed/review files use YAML, JSON, or Markdown frontmatter?
+Question: should seed/review files use YAML, JSON, or Markdown frontmatter?
 
 Recommendation: use YAML for human-edited topic files unless the Go implementation strongly favors another format.

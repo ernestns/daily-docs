@@ -1,8 +1,8 @@
 # DailyDocs
 
-DailyDocs helps developers build a sustainable learning habit by recommending one carefully curated documentation page per topic per day.
+DailyDocs recommends one documentation link per topic per day.
 
-The common reading URL is intentionally simple:
+The common reading URL is:
 
 ```text
 https://dailydocs.dev/go
@@ -25,7 +25,7 @@ The MVP supports:
 - topic search
 - one daily reading per topic
 - deterministic historical readings
-- manually curated documentation pages
+- documentation links
 - official documentation first
 - link validation
 
@@ -37,11 +37,11 @@ DailyDocs is planned as:
 
 - one Go web application
 - one SQLite database
-- one manual import executable
+- one import executable
 - one link validation executable
 - Caddy in front of the app
 
-Infrastructure should remain simple enough to run on a single VPS.
+Infrastructure runs on a single VPS.
 
 ## Documentation
 
@@ -53,4 +53,4 @@ Infrastructure should remain simple enough to run on a single VPS.
 
 Every design decision should answer one question:
 
-> Does this make it easier for someone to learn one useful thing today?
+> Does this help someone read one documentation page today?

@@ -2,12 +2,13 @@
 
 ## Approach
 
-Implement DailyDocs in thin vertical slices, with curation and data integrity first and UI second.
+Implement DailyDocs in thin vertical slices.
 
-The core product risk is not rendering a reading page. The core risk is weak, unstable, or broken recommendations.
+The core product risk is not rendering a reading page. The core risk is incorrect, stale, or broken links.
 
 ## Implementation Order
 
+0. Public hello-world Go app
 1. SQLite schema and migrations
 2. Topic/page seed importer
 3. Daily reading assignment logic with tests
@@ -16,6 +17,40 @@ The core product risk is not rendering a reading page. The core risk is weak, un
 6. Link validator
 7. Backup and restore scripts
 8. Semi-automated discovery importer
+
+## Step Zero: Public Hello World
+
+Before adding SQLite, Datastar, migrations, importer logic, or topic routes, prove the deployment path with the smallest useful Go application.
+
+Bare minimum repository pieces:
+
+- `go.mod`
+- `cmd/web/main.go`
+- `scripts/build.sh` or documented build commands
+- deployment notes for systemd and Caddy
+
+Initial routes:
+
+```text
+GET /        returns a simple DailyDocs page
+GET /health  returns ok
+```
+
+Initial configuration:
+
+```text
+ADDR=:8080
+```
+
+Definition of done:
+
+- `https://dailydocs.dev` loads publicly
+- `https://dailydocs.dev/health` returns `ok`
+- Caddy terminates TLS and proxies to the Go app
+- the app runs under systemd or an equivalent supervisor
+- the repository documents enough steps to rebuild the deployment on a fresh VPS
+
+Do not include SQLite, Datastar, migrations, importer commands, validator logic, or topic routes in this milestone.
 
 ## Core Domain First
 
@@ -59,7 +94,7 @@ This logic should be heavily tested because it is the product.
 
 Do not begin with a complex crawler.
 
-Start with a simple manually curated import format:
+Start with a simple human-readable import format:
 
 ```yaml
 topic: sqlite
@@ -78,7 +113,7 @@ Build a command:
 dailydocs import-file topics/sqlite.yaml
 ```
 
-This lets the product launch with high-quality curated pages immediately. Automated discovery can follow after the shape of good data is clearer.
+This lets the product launch with documentation links immediately. Automated discovery can follow after the shape of good data is clearer.
 
 ## Web Application
 
@@ -135,7 +170,7 @@ Responsibilities:
 - update `last_verified`
 - optionally propose URL updates
 
-Broken recommendations are highly damaging to trust, so link health should arrive early.
+Broken links should be detected before broad importer automation.
 
 ## Semi-Automated Importer
 
@@ -169,6 +204,6 @@ Operational scripts:
 
 ## MVP Content Bar
 
-Ship with 5-10 excellent topics and manually curated pages.
+Ship with 5-10 supported topics and documentation links.
 
-This proves the habit loop before investing deeply in automation.
+This validates the daily reading flow before investing in automation.

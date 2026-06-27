@@ -4,9 +4,9 @@ Version: 0.1 (MVP)
 
 ## Vision
 
-DailyDocs helps developers build a sustainable learning habit.
+DailyDocs recommends one documentation link per topic per day.
 
-Instead of searching for something to read, users receive one carefully curated documentation page for a topic they care about.
+Instead of searching for something to read, users receive one documentation link for a topic they care about.
 
 A DailyDocs reading is simply a URL.
 
@@ -24,7 +24,7 @@ No accounts. No setup. Bookmark the reading and read.
 
 ## Product Philosophy
 
-DailyDocs is intentionally small.
+DailyDocs has a limited scope.
 
 It is not:
 
@@ -35,9 +35,9 @@ It is not:
 
 It is:
 
-> A deterministic daily reading built from excellent software documentation.
+> A deterministic daily reading from software documentation.
 
-The application should become part of a developer's morning routine.
+The application is designed for repeated daily use.
 
 ## Core Principles
 
@@ -60,11 +60,11 @@ No accounts, sessions, cookies, or local storage.
 
 The URL is the reading.
 
-### Curated
+### Useful
 
-The application only recommends documentation worth reading.
+The application recommends documentation links selected from known documentation sources.
 
-Quality is significantly more important than quantity.
+The catalog should stay small unless additional links improve the daily reading experience.
 
 ### Official First
 
@@ -75,9 +75,9 @@ Community resources are only used when an official source does not exist.
 ## Goals
 
 - Encourage continuous learning
-- Remove decision fatigue
+- Provide one reading per topic per day
 - Promote official documentation
-- Make learning effortless
+- Reduce the need to search for documentation to read
 - Enable teams to learn together
 
 ## MVP User Flow
@@ -145,7 +145,7 @@ The homepage may redirect a selected topic to the topic-only URL.
 
 ## Reading Selection
 
-Each topic has a curated reading order.
+Each topic has a stable reading order.
 
 During import:
 
@@ -200,7 +200,7 @@ Display:
 
 The importer is a separate executable.
 
-Purpose: turn a topic into a curated reading list.
+Purpose: turn a topic into a reading list.
 
 Example:
 
@@ -333,7 +333,7 @@ Unique constraint:
 
 ## Deployment Philosophy
 
-Infrastructure should remain intentionally simple.
+Infrastructure should fit on a single VPS.
 
 Single Hetzner VPS, SQLite database, one Go web application, one importer executable, and one validator executable.
 
@@ -388,7 +388,7 @@ Primary:
 
 Secondary:
 
-- curated topics
+- supported topics
 - indexed pages
 - broken link rate
 - successful imports
@@ -397,6 +397,6 @@ Secondary:
 
 Every design decision should answer one question:
 
-> Does this make it easier for someone to learn one useful thing today?
+> Does this help someone read one documentation page today?
 
 If the answer is no, it probably does not belong in DailyDocs.
