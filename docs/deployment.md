@@ -127,6 +127,27 @@ curl http://localhost:8080/health
 ok
 ```
 
+## Import Seed File
+
+Seed files define a topic and its documentation links:
+
+```yaml
+topic: sqlite
+name: SQLite
+pages:
+  - title: Write-Ahead Logging
+    url: https://sqlite.org/wal.html
+    source: SQLite Documentation
+    official: true
+    estimated_minutes: 12
+```
+
+Import a file:
+
+```sh
+DB_PATH=data/dailydocs.sqlite ./bin/dailydocs import-file path/to/sqlite.yaml
+```
+
 ## Systemd
 
 Example service:

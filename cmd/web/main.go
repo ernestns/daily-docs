@@ -11,10 +11,19 @@ import (
 	"time"
 
 	"github.com/ernestns/daily-docs/internal/db"
+	"github.com/ernestns/daily-docs/internal/seed"
 )
 
 func main() {
 	ctx := context.Background()
+
+	if len(os.Args) > 1 {
+		if err := runCommand(ctx, os.Args[1:]); err != nil {
+			log.Printf("command failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -136,4 +145,29 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = fmt.Fprintln(w, "ok")
+}
+
+func runCommand(ctx context.Context, args []string) error {
+	switch args[0] {
+	case "import-file":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: dailydocs import-file path/to/topic.yaml")
+		}
+
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		result, err := seed.ImportFile(ctx, conn, args[1])
+		if err != nil {
+			return err
+		}
+
+		log.Printf("imported topic=%s pages_found=%d pages_imported=%d", result.TopicSlug, result.PagesFound, result.PagesImported)
+		return nil
+	default:
+		return fmt.Errorf("unknown command %q", args[0])
+	}
 }
