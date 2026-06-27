@@ -452,6 +452,12 @@ func TestAdminSubmissionsListsSubmissions(t *testing.T) {
 	if !strings.Contains(body, "/admin/submissions/1") {
 		t.Fatalf("expected submission detail link:\n%s", body)
 	}
+	if !strings.Contains(body, `data-href="/admin/submissions/1"`) {
+		t.Fatalf("expected clickable submission row:\n%s", body)
+	}
+	if !strings.Contains(body, `tabindex="0"`) {
+		t.Fatalf("expected keyboard-focusable submission row:\n%s", body)
+	}
 }
 
 func TestAdminCanProcessAndActivateSubmission(t *testing.T) {

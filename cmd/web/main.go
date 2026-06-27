@@ -1408,6 +1408,9 @@ var adminSubmissionsTemplate = template.Must(template.New("admin-submissions").P
     th, td { padding: 0.75rem; border-bottom: 1px solid #e4e7eb; text-align: left; vertical-align: top; }
     th { color: #52606d; font-size: 0.875rem; }
     a { color: #1f2933; }
+    tr[data-href] { cursor: pointer; }
+    tr[data-href]:hover { background: #f1f5f9; }
+    tr[data-href]:focus { outline: 2px solid #1f2933; outline-offset: -2px; }
     .notice { color: #067647; }
     .error { color: #b42318; }
   </style>
@@ -1432,7 +1435,7 @@ var adminSubmissionsTemplate = template.Must(template.New("admin-submissions").P
       </thead>
       <tbody>
         {{range .Submissions}}
-        <tr>
+        <tr data-href="/admin/submissions/{{.ID}}" tabindex="0">
           <td><a href="/admin/submissions/{{.ID}}">{{.ID}}</a></td>
           <td>{{if .SuggestedTopic}}{{.SuggestedTopic}}{{else}}-{{end}}</td>
           <td>{{.SourceHost}}</td>
@@ -1448,6 +1451,20 @@ var adminSubmissionsTemplate = template.Must(template.New("admin-submissions").P
     <p>No submissions.</p>
     {{end}}
   </main>
+  <script>
+    document.querySelectorAll("tr[data-href]").forEach((row) => {
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("a, button")) return;
+        window.location.href = row.dataset.href;
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          window.location.href = row.dataset.href;
+        }
+      });
+    });
+  </script>
 </body>
 </html>
 `))
