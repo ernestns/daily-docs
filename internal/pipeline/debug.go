@@ -58,7 +58,7 @@ func GateURL(ctx context.Context, rawURL string, opts Options, includeRawRespons
 	}
 	reviewer := openAIReviewerFromEnv(opts.Client)
 	if reviewer.apiKey == "" {
-		return GateDebugResult{}, errors.New("OPENAI_API_KEY is not set")
+		return GateDebugResult{}, errors.New("AI review provider is not configured; set OPENAI_API_KEY or ZAI_API_KEY")
 	}
 	return reviewer.GatePage(ctx, doc, includeRawResponse)
 }

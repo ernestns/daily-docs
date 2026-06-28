@@ -85,6 +85,36 @@ func writeOpenAIResponse(t *testing.T, w http.ResponseWriter, value map[string]a
 	}
 }
 
+func writeChatCompletionResponse(t *testing.T, w http.ResponseWriter, value map[string]any) {
+	t.Helper()
+
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal response value: %v", err)
+	}
+	response := map[string]any{
+		"choices": []map[string]any{
+			{
+				"message": map[string]any{
+					"content": string(encoded),
+				},
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     610,
+			"completion_tokens": 74,
+			"total_tokens":      684,
+			"completion_tokens_details": map[string]any{
+				"reasoning_tokens": 64,
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
 func openPipelineTestDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 

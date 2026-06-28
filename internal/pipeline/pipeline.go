@@ -34,6 +34,7 @@ const (
 	enrichmentMaxBreadcrumbChars     = 120
 	enrichmentMaxBreadcrumbs         = 12
 	defaultOpenAIModel               = "gpt-5-nano"
+	defaultZAIModel                  = "GLM-4.7-Flash"
 	rulesVersion                     = "heuristic-v1"
 	reviewPromptVersion              = "metadata-review-v1"
 	defaultRequestAgent              = "DailyDocs/0.1"

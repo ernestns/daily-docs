@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -15,19 +14,57 @@ import (
 )
 
 func openAIReviewerFromEnv(client *http.Client) openAIReviewer {
-	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
-	if apiKey == "" {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_REVIEW_PROVIDER")))
+	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	zaiKey := strings.TrimSpace(os.Getenv("ZAI_API_KEY"))
+	if provider == "" {
+		provider = "openai"
+		if openAIKey == "" {
+			return openAIReviewer{}
+		}
+	}
+
+	switch provider {
+	case "openai":
+		model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+		if openAIKey == "" {
+			return openAIReviewer{}
+		}
+		if model == "" {
+			model = defaultOpenAIModel
+		}
+		endpoint := strings.TrimSpace(os.Getenv("OPENAI_ENDPOINT"))
+		if endpoint == "" {
+			endpoint = "https://api.openai.com/v1/responses"
+		}
+		return openAIReviewer{
+			client:   client,
+			apiKey:   openAIKey,
+			model:    model,
+			endpoint: endpoint,
+			provider: "openai",
+		}
+	case "zai", "z.ai":
+		model := strings.TrimSpace(os.Getenv("ZAI_MODEL"))
+		if zaiKey == "" {
+			return openAIReviewer{}
+		}
+		if model == "" {
+			model = defaultZAIModel
+		}
+		endpoint := firstNonEmpty(strings.TrimSpace(os.Getenv("ZAI_ENDPOINT")), strings.TrimSpace(os.Getenv("ZAI_BASE_URL")))
+		if endpoint == "" {
+			endpoint = "https://api.z.ai/api/paas/v4/chat/completions"
+		}
+		return openAIReviewer{
+			client:   client,
+			apiKey:   zaiKey,
+			model:    model,
+			endpoint: endpoint,
+			provider: "zai",
+		}
+	default:
 		return openAIReviewer{}
-	}
-	if model == "" {
-		model = defaultOpenAIModel
-	}
-	return openAIReviewer{
-		client:   client,
-		apiKey:   apiKey,
-		model:    model,
-		endpoint: "https://api.openai.com/v1/responses",
 	}
 }
 
@@ -36,6 +73,7 @@ type openAIReviewer struct {
 	apiKey   string
 	model    string
 	endpoint string
+	provider string
 }
 
 type gateReview struct {
@@ -136,7 +174,7 @@ func (r openAIReviewer) ReviewPage(ctx context.Context, doc document) (Review, e
 
 	input := reviewInput(doc)
 	var review Review
-	enrichmentUsage, err := r.callOpenAIJSON(ctx, "daily_docs_page_enrichment", enrichmentSchema(), "You review documentation page metadata for DailyDocs. Include standalone tutorials, guides, and concept pages. Exclude landing pages, indexes, generated API references, release notes, changelogs, quizzes, playgrounds, and product pages. Return only valid JSON matching the schema.", input, &review, nil)
+	enrichmentUsage, err := r.callAIJSON(ctx, "daily_docs_page_enrichment", enrichmentSchema(), "You review documentation page metadata for DailyDocs. Include standalone tutorials, guides, and concept pages. Exclude landing pages, indexes, generated API references, release notes, changelogs, quizzes, playgrounds, and product pages. Return only valid JSON matching the schema.", input, &review, nil)
 	if err != nil {
 		return Review{}, err
 	}
@@ -161,7 +199,7 @@ func (r openAIReviewer) GatePage(ctx context.Context, doc document, includeRawRe
 		rawPtr = &raw
 	}
 	request := r.requestBody("daily_docs_page_gate", gateSchema(), gatePrompt(), gateInput(doc))
-	usage, err := r.callOpenAIJSON(ctx, "daily_docs_page_gate", gateSchema(), gatePrompt(), gateInput(doc), &gate, rawPtr)
+	usage, err := r.callAIJSON(ctx, "daily_docs_page_gate", gateSchema(), gatePrompt(), gateInput(doc), &gate, rawPtr)
 	if err != nil {
 		return GateDebugResult{Request: request}, err
 	}
@@ -197,6 +235,29 @@ func (r openAIReviewer) GatePage(ctx context.Context, doc document, includeRawRe
 }
 
 func (r openAIReviewer) requestBody(schemaName string, schema map[string]any, systemPrompt string, input map[string]any) map[string]any {
+	if r.providerName() == "zai" {
+		return map[string]any{
+			"model": r.model,
+			"messages": []map[string]string{
+				{
+					"role":    "system",
+					"content": systemPrompt,
+				},
+				{
+					"role":    "user",
+					"content": mustJSON(input),
+				},
+			},
+			"response_format": map[string]any{
+				"type": "json_schema",
+				"json_schema": map[string]any{
+					"name":   schemaName,
+					"schema": schema,
+					"strict": true,
+				},
+			},
+		}
+	}
 	body := map[string]any{
 		"model": r.model,
 		"reasoning": map[string]any{
@@ -224,7 +285,7 @@ func (r openAIReviewer) requestBody(schemaName string, schema map[string]any, sy
 	return body
 }
 
-func (r openAIReviewer) callOpenAIJSON(ctx context.Context, schemaName string, schema map[string]any, systemPrompt string, input map[string]any, output any, rawResponse *json.RawMessage) (TokenUsage, error) {
+func (r openAIReviewer) callAIJSON(ctx context.Context, schemaName string, schema map[string]any, systemPrompt string, input map[string]any, output any, rawResponse *json.RawMessage) (TokenUsage, error) {
 	body := r.requestBody(schemaName, schema, systemPrompt, input)
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -232,7 +293,11 @@ func (r openAIReviewer) callOpenAIJSON(ctx context.Context, schemaName string, s
 	}
 	endpoint := r.endpoint
 	if endpoint == "" {
-		endpoint = "https://api.openai.com/v1/responses"
+		if r.providerName() == "zai" {
+			endpoint = "https://api.z.ai/api/paas/v4/chat/completions"
+		} else {
+			endpoint = "https://api.openai.com/v1/responses"
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 	if err != nil {
@@ -251,7 +316,7 @@ func (r openAIReviewer) callOpenAIJSON(ctx context.Context, schemaName string, s
 		return TokenUsage{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return TokenUsage{}, fmt.Errorf("openai review status %d: %s", resp.StatusCode, shortenText(string(respBody), 500))
+		return TokenUsage{}, fmt.Errorf("%s review status %d: %s", r.providerName(), resp.StatusCode, shortenText(string(respBody), 500))
 	}
 	if rawResponse != nil {
 		*rawResponse = append((*rawResponse)[:0], respBody...)
@@ -259,12 +324,19 @@ func (r openAIReviewer) callOpenAIJSON(ctx context.Context, schemaName string, s
 
 	text := responseOutputText(respBody)
 	if text == "" {
-		return TokenUsage{}, errors.New("openai review missing output text")
+		return TokenUsage{}, fmt.Errorf("%s review missing output text", r.providerName())
 	}
 	if err := json.Unmarshal([]byte(text), output); err != nil {
-		return TokenUsage{}, fmt.Errorf("decode openai review: %w", err)
+		return TokenUsage{}, fmt.Errorf("decode %s review: %w", r.providerName(), err)
 	}
 	return responseTokenUsage(respBody), nil
+}
+
+func (r openAIReviewer) providerName() string {
+	if strings.TrimSpace(r.provider) != "" {
+		return strings.TrimSpace(r.provider)
+	}
+	return "openai"
 }
 
 func reviewInput(doc document) map[string]any {
@@ -358,6 +430,11 @@ func responseOutputText(body []byte) string {
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"output"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return ""
@@ -372,6 +449,11 @@ func responseOutputText(body []byte) string {
 			}
 		}
 	}
+	for _, choice := range parsed.Choices {
+		if choice.Message.Content != "" {
+			return choice.Message.Content
+		}
+	}
 	return ""
 }
 
@@ -380,19 +462,36 @@ func responseTokenUsage(body []byte) TokenUsage {
 		Usage struct {
 			InputTokens         int `json:"input_tokens"`
 			OutputTokens        int `json:"output_tokens"`
+			PromptTokens        int `json:"prompt_tokens"`
+			CompletionTokens    int `json:"completion_tokens"`
 			TotalTokens         int `json:"total_tokens"`
 			OutputTokensDetails struct {
 				ReasoningTokens int `json:"reasoning_tokens"`
 			} `json:"output_tokens_details"`
+			CompletionTokensDetails struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return TokenUsage{}
 	}
+	inputTokens := parsed.Usage.InputTokens
+	if inputTokens == 0 {
+		inputTokens = parsed.Usage.PromptTokens
+	}
+	outputTokens := parsed.Usage.OutputTokens
+	if outputTokens == 0 {
+		outputTokens = parsed.Usage.CompletionTokens
+	}
+	reasoningTokens := parsed.Usage.OutputTokensDetails.ReasoningTokens
+	if reasoningTokens == 0 {
+		reasoningTokens = parsed.Usage.CompletionTokensDetails.ReasoningTokens
+	}
 	return TokenUsage{
-		InputTokens:     parsed.Usage.InputTokens,
-		OutputTokens:    parsed.Usage.OutputTokens,
-		ReasoningTokens: parsed.Usage.OutputTokensDetails.ReasoningTokens,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		ReasoningTokens: reasoningTokens,
 		TotalTokens:     parsed.Usage.TotalTokens,
 	}
 }

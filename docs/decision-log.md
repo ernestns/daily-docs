@@ -156,6 +156,18 @@ Implications:
 - Scheduled backups should not block the submission queue or manual processing pipeline.
 - Before regular scheduled processing, revisit offsite backup cadence, storage provider, retention, and restore testing.
 
+### Keep OpenAI as Default AI Review Provider
+
+Decision: default AI review to OpenAI when `AI_REVIEW_PROVIDER` is not set. z.ai remains available only when explicitly selected.
+
+Reason: z.ai is not currently viable for DailyDocs processing. It has a concurrency limit of 1 and observed response times above 50 seconds, which makes the candidate review pipeline too slow and fragile for source processing.
+
+Implications:
+
+- Blank `AI_REVIEW_PROVIDER` should not auto-select z.ai, even if `ZAI_API_KEY` is present.
+- Use `AI_REVIEW_PROVIDER=zai` only for explicit experiments.
+- Runtime failures should continue to fall back to deterministic review rather than trying another AI provider.
+
 ## Open Decisions
 
 ### Canonical Day Boundary

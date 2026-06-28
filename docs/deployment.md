@@ -122,6 +122,14 @@ Edit `.env` and set:
 OPENAI_API_KEY=your-key
 ```
 
+To use z.ai instead of OpenAI for AI review, set:
+
+```text
+AI_REVIEW_PROVIDER=zai
+ZAI_API_KEY=your-key
+ZAI_MODEL=GLM-4.7-Flash
+```
+
 Run local commands through the env wrapper:
 
 ```sh
