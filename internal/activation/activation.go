@@ -11,10 +11,11 @@ import (
 var ErrNoEligibleCandidates = errors.New("no eligible candidates")
 
 type Result struct {
-	SubmissionID int64
-	TopicID      int64
-	TopicSlug    string
-	Activated    int
+	SubmissionID  int64
+	TopicSourceID int64
+	TopicID       int64
+	TopicSlug     string
+	Activated     int
 }
 
 type candidate struct {
@@ -97,6 +98,94 @@ func ActivateCandidates(ctx context.Context, conn *sql.DB, submissionID int64) (
 	}, nil
 }
 
+func ActivateSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64) (Result, error) {
+	source, err := loadSource(ctx, conn, sourceID)
+	if err != nil {
+		return Result{}, err
+	}
+
+	candidates, err := eligibleSourceCandidates(ctx, conn, sourceID)
+	if err != nil {
+		return Result{}, err
+	}
+	if len(candidates) == 0 {
+		return Result{}, ErrNoEligibleCandidates
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return Result{}, fmt.Errorf("begin source activation: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	nextOrder, err := nextReadingOrder(ctx, tx, source.TopicID)
+	if err != nil {
+		return Result{}, err
+	}
+
+	activated := 0
+	for _, cand := range candidates {
+		pageID, created, err := upsertPage(ctx, tx, source.TopicID, cand, nextOrder)
+		if err != nil {
+			return Result{}, err
+		}
+		if created {
+			nextOrder++
+		}
+		if err := markCandidateActivated(ctx, tx, cand.ID, pageID, source.TopicID); err != nil {
+			return Result{}, err
+		}
+		activated++
+	}
+
+	if source.SubmissionID > 0 {
+		if err := markSubmissionActive(ctx, tx, source.SubmissionID); err != nil {
+			return Result{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Result{}, fmt.Errorf("commit source activation: %w", err)
+	}
+
+	return Result{
+		SubmissionID:  source.SubmissionID,
+		TopicSourceID: sourceID,
+		TopicID:       source.TopicID,
+		TopicSlug:     source.TopicSlug,
+		Activated:     activated,
+	}, nil
+}
+
+type source struct {
+	ID           int64
+	SubmissionID int64
+	TopicID      int64
+	TopicSlug    string
+	TopicName    string
+}
+
+func loadSource(ctx context.Context, conn *sql.DB, sourceID int64) (source, error) {
+	var src source
+	err := conn.QueryRowContext(ctx, `
+		SELECT
+			ts.id,
+			COALESCE(ts.created_from_submission_id, 0),
+			ts.topic_id,
+			t.slug,
+			t.name
+		FROM topic_sources ts
+		JOIN topics t ON t.id = ts.topic_id
+		WHERE ts.id = ?
+	`, sourceID).Scan(&src.ID, &src.SubmissionID, &src.TopicID, &src.TopicSlug, &src.TopicName)
+	if err != nil {
+		return source{}, fmt.Errorf("load source for activation: %w", err)
+	}
+	return src, nil
+}
+
 func eligibleCandidates(ctx context.Context, conn *sql.DB, submissionID int64) ([]candidate, error) {
 	rows, err := conn.QueryContext(ctx, `
 		SELECT
@@ -132,6 +221,45 @@ func eligibleCandidates(ctx context.Context, conn *sql.DB, submissionID int64) (
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+func eligibleSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64) ([]candidate, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT
+			id,
+			pipeline_run_id,
+			proposed_topic_slug,
+			proposed_topic_name,
+			title,
+			url,
+			source,
+			official,
+			estimated_minutes,
+			score
+		FROM page_candidates
+		WHERE topic_source_id = ?
+			AND status IN ('eligible', 'activated')
+		ORDER BY title ASC, id ASC
+	`, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("query eligible source candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var candidates []candidate
+	for rows.Next() {
+		var cand candidate
+		var official int
+		if err := rows.Scan(&cand.ID, &cand.PipelineRunID, &cand.ProposedTopicSlug, &cand.ProposedTopicName, &cand.Title, &cand.URL, &cand.Source, &official, &cand.EstimatedMinutes, &cand.Score); err != nil {
+			return nil, fmt.Errorf("scan source candidate: %w", err)
+		}
+		cand.Official = official == 1
+		candidates = append(candidates, cand)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source candidates: %w", err)
 	}
 	return candidates, nil
 }

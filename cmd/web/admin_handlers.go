@@ -53,13 +53,21 @@ type adminSubmissionDetail struct {
 type adminSourceRow struct {
 	ID              int64
 	SubmissionID    int64
+	TopicID         int64
 	TopicSlug       string
 	TopicName       string
 	Status          string
 	SourceType      string
+	BaseURL         string
 	NormalizedURL   string
 	LastProcessedAt string
 	LastError       string
+}
+
+type adminSourceDetail struct {
+	adminSourceRow
+	Runs       []adminRunRow
+	Candidates []adminCandidateRow
 }
 
 type adminRunRow struct {
@@ -86,6 +94,10 @@ type adminCandidateRow struct {
 	Status           string
 	EstimatedMinutes string
 	Reason           string
+	TokenSummary     string
+	ReviewModel      string
+	Confidence       string
+	Rationale        string
 }
 
 func (a app) adminHandler(w http.ResponseWriter, r *http.Request) {
@@ -115,10 +127,84 @@ func (a app) adminHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/submissions", http.StatusSeeOther)
 	case path == "/admin/sources":
 		a.adminSourcesHandler(w, r, token)
+	case strings.HasPrefix(path, "/admin/sources/"):
+		a.adminSourceHandler(w, r, token, path)
 	case path == "/admin/submissions":
 		a.adminSubmissionsHandler(w, r, token)
 	case strings.HasPrefix(path, "/admin/submissions/"):
 		a.adminSubmissionHandler(w, r, token, path)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token string, path string) {
+	rest := strings.TrimPrefix(path, "/admin/sources/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 1 || len(parts) > 2 {
+		http.NotFound(w, r)
+		return
+	}
+	sourceID, err := parsePositiveID(parts[0], "source-id")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		a.adminSourceDetailHandler(w, r, token, sourceID)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !validCSRF(r, token) {
+		http.Error(w, "invalid csrf token", http.StatusForbidden)
+		return
+	}
+
+	switch parts[1] {
+	case "process":
+		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
+		if err != nil {
+			log.Printf("admin process source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		redirectAdminSource(w, r, sourceID, fmt.Sprintf("processed source %d: %d eligible", sourceID, result.EligibleCount), "")
+	case "activate":
+		result, err := activation.ActivateSourceCandidates(r.Context(), a.db, sourceID)
+		if err != nil {
+			log.Printf("admin activate source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		redirectAdminSource(w, r, sourceID, fmt.Sprintf("activated %d candidates", result.Activated), "")
+	case "create-source":
+		current, err := topicsource.Load(r.Context(), a.db, sourceID)
+		if err != nil {
+			log.Printf("admin load source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		created, err := topicsource.CreateForTopic(r.Context(), a.db, topicsource.CreateForTopicInput{
+			TopicID: current.TopicID,
+			URL:     r.Form.Get("url"),
+		})
+		if err != nil {
+			log.Printf("admin create sibling source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		redirectAdminSource(w, r, created.ID, fmt.Sprintf("created source %d", created.ID), "")
 	default:
 		http.NotFound(w, r)
 	}
@@ -166,6 +252,31 @@ func (a app) adminSourcesHandler(w http.ResponseWriter, r *http.Request, token s
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (a app) adminSourceDetailHandler(w http.ResponseWriter, r *http.Request, token string, sourceID int64) {
+	detail, err := adminGetSource(r.Context(), a.db, sourceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("admin show source failed: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	renderTemplate(w, adminSourceDetailTemplate, struct {
+		Source adminSourceDetail
+		CSRF   string
+		Notice string
+		Error  string
+	}{
+		Source: detail,
+		CSRF:   csrfToken(r, token),
+		Notice: r.URL.Query().Get("notice"),
+		Error:  r.URL.Query().Get("error"),
+	})
 }
 
 func (a app) adminLoginHandler(w http.ResponseWriter, r *http.Request, token string) {
@@ -391,9 +502,12 @@ func adminListSources(ctx context.Context, conn *sql.DB, submissionID int64) ([]
 	rows, err := conn.QueryContext(ctx, `
 		SELECT
 			ts.id,
+			ts.topic_id,
 			t.slug,
+			t.name,
 			ts.status,
 			ts.source_type,
+			ts.base_url,
 			ts.normalized_url,
 			COALESCE(ts.last_processed_at, ''),
 			ts.last_error
@@ -410,7 +524,7 @@ func adminListSources(ctx context.Context, conn *sql.DB, submissionID int64) ([]
 	var sources []adminSourceRow
 	for rows.Next() {
 		var source adminSourceRow
-		if err := rows.Scan(&source.ID, &source.TopicSlug, &source.Status, &source.SourceType, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
+		if err := rows.Scan(&source.ID, &source.TopicID, &source.TopicSlug, &source.TopicName, &source.Status, &source.SourceType, &source.BaseURL, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
 			return nil, fmt.Errorf("scan admin source: %w", err)
 		}
 		source.SubmissionID = submissionID
@@ -433,10 +547,12 @@ func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, e
 		SELECT
 			ts.id,
 			COALESCE(ts.created_from_submission_id, 0),
+			ts.topic_id,
 			t.slug,
 			t.name,
 			ts.status,
 			ts.source_type,
+			ts.base_url,
 			ts.normalized_url,
 			COALESCE(ts.last_processed_at, ''),
 			ts.last_error
@@ -452,7 +568,7 @@ func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, e
 	var sources []adminSourceRow
 	for rows.Next() {
 		var source adminSourceRow
-		if err := rows.Scan(&source.ID, &source.SubmissionID, &source.TopicSlug, &source.TopicName, &source.Status, &source.SourceType, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
+		if err := rows.Scan(&source.ID, &source.SubmissionID, &source.TopicID, &source.TopicSlug, &source.TopicName, &source.Status, &source.SourceType, &source.BaseURL, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
 			return nil, fmt.Errorf("scan admin all source: %w", err)
 		}
 		if source.LastProcessedAt == "" {
@@ -469,6 +585,62 @@ func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, e
 	return sources, nil
 }
 
+func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSourceDetail, error) {
+	var detail adminSourceDetail
+	err := conn.QueryRowContext(ctx, `
+		SELECT
+			ts.id,
+			COALESCE(ts.created_from_submission_id, 0),
+			ts.topic_id,
+			t.slug,
+			t.name,
+			ts.status,
+			ts.source_type,
+			ts.base_url,
+			ts.normalized_url,
+			COALESCE(ts.last_processed_at, ''),
+			ts.last_error
+		FROM topic_sources ts
+		JOIN topics t ON t.id = ts.topic_id
+		WHERE ts.id = ?
+	`, sourceID).Scan(&detail.ID, &detail.SubmissionID, &detail.TopicID, &detail.TopicSlug, &detail.TopicName, &detail.Status, &detail.SourceType, &detail.BaseURL, &detail.NormalizedURL, &detail.LastProcessedAt, &detail.LastError)
+	if err != nil {
+		return adminSourceDetail{}, err
+	}
+	if detail.LastProcessedAt == "" {
+		detail.LastProcessedAt = "-"
+	}
+	if detail.LastError == "" {
+		detail.LastError = "-"
+	}
+
+	runs, err := adminListSourceRuns(ctx, conn, sourceID)
+	if err != nil {
+		return adminSourceDetail{}, err
+	}
+	candidates, err := adminListSourceCandidates(ctx, conn, sourceID)
+	if err != nil {
+		return adminSourceDetail{}, err
+	}
+	detail.Runs = runs
+	detail.Candidates = candidates
+	return detail, nil
+}
+
+func adminListSourceRuns(ctx context.Context, conn *sql.DB, sourceID int64) ([]adminRunRow, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT id, status, started_at, completed_at, discovered_count, crawled_count, eligible_count, rejected_count, failure_count, error
+		FROM pipeline_runs
+		WHERE topic_source_id = ?
+		ORDER BY id DESC
+	`, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("query admin source runs: %w", err)
+	}
+	defer rows.Close()
+	return scanAdminRuns(rows)
+}
+
 func adminListRuns(ctx context.Context, conn *sql.DB, submissionID int64) ([]adminRunRow, error) {
 	rows, err := conn.QueryContext(ctx, `
 		SELECT id, status, started_at, completed_at, discovered_count, crawled_count, eligible_count, rejected_count, failure_count, error
@@ -480,7 +652,10 @@ func adminListRuns(ctx context.Context, conn *sql.DB, submissionID int64) ([]adm
 		return nil, fmt.Errorf("query admin runs: %w", err)
 	}
 	defer rows.Close()
+	return scanAdminRuns(rows)
+}
 
+func scanAdminRuns(rows *sql.Rows) ([]adminRunRow, error) {
 	var runs []adminRunRow
 	for rows.Next() {
 		var run adminRunRow
@@ -503,7 +678,15 @@ func adminListRuns(ctx context.Context, conn *sql.DB, submissionID int64) ([]adm
 func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) ([]adminCandidateRow, error) {
 	rows, err := conn.QueryContext(ctx, `
 		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
-			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END
+			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END,
+			gate_input_tokens,
+			gate_output_tokens,
+			gate_reasoning_tokens,
+			gate_total_tokens,
+			enrichment_total_tokens,
+			review_model,
+			review_confidence,
+			review_rationale
 		FROM page_candidates
 		WHERE documentation_submission_id = ?
 		ORDER BY score DESC, title ASC
@@ -512,14 +695,46 @@ func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) 
 		return nil, fmt.Errorf("query admin candidates: %w", err)
 	}
 	defer rows.Close()
+	return scanAdminCandidates(rows)
+}
 
+func adminListSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64) ([]adminCandidateRow, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
+			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END,
+			gate_input_tokens,
+			gate_output_tokens,
+			gate_reasoning_tokens,
+			gate_total_tokens,
+			enrichment_total_tokens,
+			review_model,
+			review_confidence,
+			review_rationale
+		FROM page_candidates
+		WHERE topic_source_id = ?
+		ORDER BY score DESC, title ASC
+	`, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("query admin source candidates: %w", err)
+	}
+	defer rows.Close()
+	return scanAdminCandidates(rows)
+}
+
+func scanAdminCandidates(rows *sql.Rows) ([]adminCandidateRow, error) {
 	var candidates []adminCandidateRow
 	for rows.Next() {
 		var cand adminCandidateRow
 		var estimated sql.NullInt64
 		var gateScore sql.NullInt64
 		var gateReason string
-		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &gateScore, &gateReason, &cand.RejectStage, &cand.Status, &estimated, &cand.Reason); err != nil {
+		var reviewConfidence float64
+		var gateInput int
+		var gateOutput int
+		var gateReasoning int
+		var gateTotal int
+		var enrichmentTotal int
+		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &gateScore, &gateReason, &cand.RejectStage, &cand.Status, &estimated, &cand.Reason, &gateInput, &gateOutput, &gateReasoning, &gateTotal, &enrichmentTotal, &cand.ReviewModel, &reviewConfidence, &cand.Rationale); err != nil {
 			return nil, fmt.Errorf("scan admin candidate: %w", err)
 		}
 		cand.Gate = "-"
@@ -535,6 +750,14 @@ func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) 
 		cand.EstimatedMinutes = "-"
 		if estimated.Valid {
 			cand.EstimatedMinutes = strconv.FormatInt(estimated.Int64, 10)
+		}
+		cand.TokenSummary = fmt.Sprintf("gate %d/%d/%d/%d enrich %d", gateInput, gateOutput, gateReasoning, gateTotal, enrichmentTotal)
+		cand.Confidence = fmt.Sprintf("%.2f", reviewConfidence)
+		if cand.ReviewModel == "" {
+			cand.ReviewModel = "-"
+		}
+		if cand.Rationale == "" {
+			cand.Rationale = "-"
 		}
 		candidates = append(candidates, cand)
 	}
@@ -568,6 +791,21 @@ func redirectAdminSources(w http.ResponseWriter, r *http.Request, notice string,
 		values.Set("error", errorMessage)
 	}
 	target := "/admin/sources"
+	if encoded := values.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func redirectAdminSource(w http.ResponseWriter, r *http.Request, sourceID int64, notice string, errorMessage string) {
+	values := url.Values{}
+	if notice != "" {
+		values.Set("notice", notice)
+	}
+	if errorMessage != "" {
+		values.Set("error", errorMessage)
+	}
+	target := fmt.Sprintf("/admin/sources/%d", sourceID)
 	if encoded := values.Encode(); encoded != "" {
 		target += "?" + encoded
 	}

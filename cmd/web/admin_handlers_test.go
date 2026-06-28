@@ -290,3 +290,116 @@ func TestAdminCanProcessSourceFromSourcesPage(t *testing.T) {
 		t.Fatalf("expected one source run, got %d", runCount)
 	}
 }
+
+func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
+	insertWebSourceCandidate(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/sources/%d", sourceID), nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		"Source",
+		"Rust",
+		"Ownership",
+		"gpt-5-nano",
+		"gate 100/20/5/120 enrich 40",
+		"Excellent daily reading.",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in source detail:\n%s", expected, body)
+		}
+	}
+}
+
+func TestAdminCanActivateSourceCandidates(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
+	insertWebSourceCandidate(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{"csrf": {csrf}}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/activate", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected activate source redirect, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var pageCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages WHERE url = 'https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html'").Scan(&pageCount); err != nil {
+		t.Fatalf("count activated pages: %v", err)
+	}
+	if pageCount != 1 {
+		t.Fatalf("expected activated source page, got %d", pageCount)
+	}
+}
+
+func TestAdminCanCreateNarrowerSourceFromNeedsScopeSource(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'needs_scope', last_error = 'too broad' WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source needs_scope: %v", err)
+	}
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{
+		"csrf": {csrf},
+		"url":  {"https://doc.rust-lang.org/stable/book"},
+	}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/create-source", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected create narrower source redirect, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var sourceCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM topic_sources WHERE normalized_url = 'https://doc.rust-lang.org/stable/book'").Scan(&sourceCount); err != nil {
+		t.Fatalf("count narrower source: %v", err)
+	}
+	if sourceCount != 1 {
+		t.Fatalf("expected one narrower source, got %d", sourceCount)
+	}
+}

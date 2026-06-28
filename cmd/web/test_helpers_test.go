@@ -159,6 +159,69 @@ func createWebTopicSource(t *testing.T, ctx context.Context, conn *sql.DB, submi
 	return source.ID
 }
 
+func insertWebSourceRun(t *testing.T, ctx context.Context, conn *sql.DB, submissionID int64, sourceID int64) int64 {
+	t.Helper()
+
+	result, err := conn.ExecContext(ctx, `
+		INSERT INTO pipeline_runs (
+			documentation_submission_id,
+			topic_source_id,
+			status,
+			discovered_count,
+			crawled_count,
+			eligible_count,
+			rejected_count
+		)
+		VALUES (?, ?, 'completed', 10, 8, 1, 7)
+	`, submissionID, sourceID)
+	if err != nil {
+		t.Fatalf("insert source run: %v", err)
+	}
+	runID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("read source run id: %v", err)
+	}
+	return runID
+}
+
+func insertWebSourceCandidate(t *testing.T, ctx context.Context, conn *sql.DB, submissionID int64, sourceID int64, runID int64, title string, rawURL string) {
+	t.Helper()
+
+	_, err := conn.ExecContext(ctx, `
+		INSERT INTO page_candidates (
+			documentation_submission_id,
+			pipeline_run_id,
+			topic_source_id,
+			proposed_topic_slug,
+			proposed_topic_name,
+			title,
+			url,
+			normalized_url,
+			source,
+			word_count,
+			score,
+			gate_score,
+			gate_page_type,
+			reject_stage,
+			review_model,
+			review_confidence,
+			review_rationale,
+			gate_input_tokens,
+			gate_output_tokens,
+			gate_reasoning_tokens,
+			gate_total_tokens,
+			enrichment_total_tokens,
+			official,
+			estimated_minutes,
+			status
+		)
+		VALUES (?, ?, ?, 'rust', 'Rust', ?, ?, ?, 'Rust Documentation', 800, 95, 91, 'concept', '', 'gpt-5-nano', 0.93, 'Excellent daily reading.', 100, 20, 5, 120, 40, 1, 4, 'eligible')
+	`, submissionID, runID, sourceID, title, rawURL, rawURL)
+	if err != nil {
+		t.Fatalf("insert source candidate: %v", err)
+	}
+}
+
 func adminDocsServer() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {

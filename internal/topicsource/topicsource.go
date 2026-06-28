@@ -34,6 +34,58 @@ type CreateFromSubmissionInput struct {
 	SourceType   string
 }
 
+type CreateForTopicInput struct {
+	TopicID    int64
+	URL        string
+	SourceType string
+}
+
+func CreateForTopic(ctx context.Context, conn *sql.DB, input CreateForTopicInput) (Source, error) {
+	if input.TopicID < 1 {
+		return Source{}, errors.New("topic id must be positive")
+	}
+	normalizedURL, sourceHost, err := submission.NormalizeURL(input.URL)
+	if err != nil {
+		return Source{}, err
+	}
+	sourceType := strings.TrimSpace(input.SourceType)
+	if sourceType == "" {
+		sourceType = "documentation"
+	}
+
+	_, err = conn.ExecContext(ctx, `
+		INSERT INTO topic_sources (
+			topic_id,
+			base_url,
+			normalized_url,
+			source_host,
+			source_type,
+			status,
+			updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))
+		ON CONFLICT(topic_id, normalized_url) DO UPDATE SET
+			base_url = excluded.base_url,
+			source_host = excluded.source_host,
+			source_type = excluded.source_type,
+			status = 'active',
+			updated_at = datetime('now')
+	`, input.TopicID, strings.TrimSpace(input.URL), normalizedURL, sourceHost, sourceType)
+	if err != nil {
+		return Source{}, fmt.Errorf("upsert topic source: %w", err)
+	}
+
+	var sourceID int64
+	if err := conn.QueryRowContext(ctx, `
+		SELECT id
+		FROM topic_sources
+		WHERE topic_id = ? AND normalized_url = ?
+	`, input.TopicID, normalizedURL).Scan(&sourceID); err != nil {
+		return Source{}, fmt.Errorf("read topic source id: %w", err)
+	}
+	return Load(ctx, conn, sourceID)
+}
+
 func CreateFromSubmission(ctx context.Context, conn *sql.DB, input CreateFromSubmissionInput) (Source, error) {
 	if input.SubmissionID < 1 {
 		return Source{}, errors.New("submission id must be positive")

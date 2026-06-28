@@ -45,7 +45,7 @@
       <tbody>
         {{range .Sources}}
         <tr>
-          <td>{{.ID}}</td>
+          <td><a href="/admin/sources/{{.ID}}">{{.ID}}</a></td>
           <td>{{.TopicName}}<br><small>{{.TopicSlug}}</small></td>
           <td>{{.Status}}</td>
           <td>{{.SourceType}}</td>
