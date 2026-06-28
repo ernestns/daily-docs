@@ -610,6 +610,9 @@ func (a app) discoverSourcePreview(ctx context.Context, sourceID int64) (int, er
 	if err != nil {
 		return 0, err
 	}
+	if err := adminClaimSourceProcessing(ctx, a.db, sourceID); err != nil {
+		return 0, err
+	}
 	discovery, err := pipeline.DiscoverURL(ctx, source.NormalizedURL, pipeline.Options{MaxPages: 50, MaxDepth: 2})
 	preview := topicsource.DiscoveryPreview{}
 	if err != nil {
@@ -630,6 +633,28 @@ func (a app) discoverSourcePreview(ctx context.Context, sourceID int64) (int, er
 		return 0, err
 	}
 	return discovery.DiscoveredCount, nil
+}
+
+func adminClaimSourceProcessing(ctx context.Context, conn *sql.DB, sourceID int64) error {
+	result, err := conn.ExecContext(ctx, `
+		UPDATE topic_sources
+		SET status = 'processing',
+			last_error = '',
+			updated_at = datetime('now')
+		WHERE id = ?
+			AND status NOT IN ('disabled', 'processing')
+	`, sourceID)
+	if err != nil {
+		return fmt.Errorf("claim source processing: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read source processing claim: %w", err)
+	}
+	if affected == 0 {
+		return pipeline.ErrSourceAlreadyProcessing
+	}
+	return nil
 }
 
 func sourceDiscoveryStatus(source adminSourceRow) string {

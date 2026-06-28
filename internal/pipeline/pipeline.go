@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,6 +38,8 @@ const (
 	reviewPromptVersion              = "metadata-review-v1"
 	defaultRequestAgent              = "DailyDocs/0.1"
 )
+
+var ErrSourceAlreadyProcessing = errors.New("topic source is already processing")
 
 type DiscoveryTooBroadError struct {
 	BaseURL string
@@ -236,13 +239,13 @@ func ProcessSource(ctx context.Context, conn *sql.DB, sourceID int64, opts Optio
 		return Result{}, err
 	}
 
-	runID, err := startRun(ctx, conn, sub, opts)
-	if err != nil {
+	if err := markTopicSourceProcessing(ctx, conn, sourceID); err != nil {
 		return Result{}, err
 	}
 
-	if err := markTopicSourceProcessing(ctx, conn, sourceID); err != nil {
-		_ = failRun(ctx, conn, runID, Result{SubmissionID: sub.ID, TopicSourceID: sourceID, PipelineRunID: runID}, err)
+	runID, err := startRun(ctx, conn, sub, opts)
+	if err != nil {
+		_ = markTopicSourceFailed(ctx, conn, sourceID, err)
 		return Result{}, err
 	}
 

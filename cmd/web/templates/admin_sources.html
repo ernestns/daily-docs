@@ -15,6 +15,7 @@
     th { color: #52606d; font-size: 0.875rem; }
     form { display: inline; }
     button { padding: 0.6rem 0.85rem; border: 0; border-radius: 6px; font: inherit; color: #fff; background: #1f2933; cursor: pointer; }
+    button:disabled { cursor: progress; opacity: 0.65; }
     a { color: #1f2933; }
     .notice { color: #067647; }
     .error { color: #b42318; }
@@ -68,5 +69,23 @@
     <p>No sources.</p>
     {{end}}
   </main>
+  <script>
+    document.querySelectorAll('form[method="post"]').forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        if (form.dataset.submitting === "true") {
+          event.preventDefault();
+          return;
+        }
+        form.dataset.submitting = "true";
+        const submitter = event.submitter || form.querySelector('button[type="submit"]');
+        form.querySelectorAll("button").forEach((button) => {
+          button.disabled = true;
+        });
+        if (submitter) {
+          submitter.textContent = "Working...";
+        }
+      });
+    });
+  </script>
 </body>
 </html>

@@ -365,6 +365,49 @@ func TestAdminCanDiscoverSourceWithoutProcessing(t *testing.T) {
 	}
 }
 
+func TestAdminBlocksDuplicateSourceDiscovery(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	server := adminDocsServer()
+	defer server.Close()
+	submissionID := insertWebSubmission(t, ctx, conn, server.URL+"/docs", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'processing' WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source processing: %v", err)
+	}
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{"csrf": {csrf}}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/discover", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected discover redirect, got %d: %s", response.Code, response.Body.String())
+	}
+	location := response.Header().Get("Location")
+	if !strings.Contains(location, "source+cannot+be+discovered+while+status+is+processing") {
+		t.Fatalf("expected duplicate discovery guardrail error, got %q", location)
+	}
+
+	var historyCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM source_discovery_runs WHERE topic_source_id = ?", sourceID).Scan(&historyCount); err != nil {
+		t.Fatalf("count discovery history: %v", err)
+	}
+	if historyCount != 0 {
+		t.Fatalf("expected no discovery history row, got %d", historyCount)
+	}
+}
+
 func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "test-admin-token")
 

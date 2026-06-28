@@ -227,6 +227,47 @@ func TestProcessSourcePersistsSourceLinkedCandidates(t *testing.T) {
 	}
 }
 
+func TestProcessSourceRejectsAlreadyProcessingSource(t *testing.T) {
+	ctx := context.Background()
+	conn := openPipelineTestDB(t, ctx)
+	defer conn.Close()
+
+	server := docsServer()
+	defer server.Close()
+
+	sub, err := submission.Create(ctx, conn, submission.CreateInput{
+		URL:            server.URL + "/docs/",
+		SuggestedTopic: "Docs",
+	})
+	if err != nil {
+		t.Fatalf("create submission: %v", err)
+	}
+	source, err := topicsource.CreateFromSubmission(ctx, conn, topicsource.CreateFromSubmissionInput{
+		SubmissionID: sub.ID,
+		TopicSlug:    "docs",
+		TopicName:    "Docs",
+	})
+	if err != nil {
+		t.Fatalf("create topic source: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'processing' WHERE id = ?", source.ID); err != nil {
+		t.Fatalf("mark source processing: %v", err)
+	}
+
+	_, err = ProcessSource(ctx, conn, source.ID, Options{Client: server.Client()})
+	if !errors.Is(err, ErrSourceAlreadyProcessing) {
+		t.Fatalf("expected ErrSourceAlreadyProcessing, got %v", err)
+	}
+
+	var runCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = ?", source.ID).Scan(&runCount); err != nil {
+		t.Fatalf("count source runs: %v", err)
+	}
+	if runCount != 0 {
+		t.Fatalf("expected no duplicate run, got %d", runCount)
+	}
+}
+
 func TestProcessSourcePersistsReviewTokenUsage(t *testing.T) {
 	ctx := context.Background()
 	conn := openPipelineTestDB(t, ctx)

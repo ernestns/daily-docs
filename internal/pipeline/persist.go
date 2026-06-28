@@ -327,15 +327,25 @@ func markSubmissionFailed(ctx context.Context, conn *sql.DB, submissionID int64,
 }
 
 func markTopicSourceProcessing(ctx context.Context, conn *sql.DB, sourceID int64) error {
-	_, err := conn.ExecContext(ctx, `
+	result, err := conn.ExecContext(ctx, `
 		UPDATE topic_sources
 		SET status = 'processing',
 			last_error = '',
 			updated_at = datetime('now')
 		WHERE id = ?
-			AND status != 'disabled'
+			AND status NOT IN ('disabled', 'processing')
 	`, sourceID)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrSourceAlreadyProcessing
+	}
+	return nil
 }
 
 func markTopicSourceProcessed(ctx context.Context, conn *sql.DB, sourceID int64) error {

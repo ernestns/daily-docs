@@ -67,6 +67,10 @@
       background: #1f2933;
       cursor: pointer;
     }
+    button:disabled {
+      cursor: progress;
+      opacity: 0.65;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -136,5 +140,23 @@
     {{end}}
     <p><a href="/">All topics</a></p>
   </main>
+  <script>
+    document.querySelectorAll('form[method="post"]').forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        if (form.dataset.submitting === "true") {
+          event.preventDefault();
+          return;
+        }
+        form.dataset.submitting = "true";
+        const submitter = event.submitter || form.querySelector('button[type="submit"]');
+        form.querySelectorAll("button").forEach((button) => {
+          button.disabled = true;
+        });
+        if (submitter) {
+          submitter.textContent = "Working...";
+        }
+      });
+    });
+  </script>
 </body>
 </html>
