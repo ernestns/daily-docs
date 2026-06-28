@@ -34,18 +34,24 @@
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
+    {{if .Source.CanDiscover}}
     <form method="post" action="/admin/sources/{{.Source.ID}}/discover">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">Discover</button>
     </form>
+    {{end}}
+    {{if .Source.CanProcess}}
     <form method="post" action="/admin/sources/{{.Source.ID}}/process">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">Process</button>
     </form>
+    {{end}}
+    {{if .Source.CanActivate}}
     <form method="post" action="/admin/sources/{{.Source.ID}}/activate">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">Activate Candidates</button>
     </form>
+    {{end}}
 
     <section>
       <h2>Details</h2>
@@ -102,7 +108,7 @@
       {{else}}<p>No discovery attempts.</p>{{end}}
     </section>
 
-    {{if eq .Source.Status "needs_scope"}}
+    {{if .Source.CanCreateSource}}
     <section>
       <h2>Add Narrower Source</h2>
       <form class="source-form" method="post" action="/admin/sources/{{.Source.ID}}/create-source">

@@ -260,6 +260,9 @@ func TestAdminCanProcessSourceFromSourcesPage(t *testing.T) {
 	defer server.Close()
 	submissionID := insertWebSubmission(t, ctx, conn, server.URL+"/docs", "Rust")
 	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'ready_to_process', discovery_count = 1 WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source ready_to_process: %v", err)
+	}
 
 	handler := newTestHandler(conn)
 	cookie := adminLoginCookie(t, handler, "test-admin-token")
@@ -373,6 +376,9 @@ func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
 	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
 	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
 	insertWebSourceCandidate(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'candidates_ready', discovery_count = 1 WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source candidates_ready: %v", err)
+	}
 
 	handler := newTestHandler(conn)
 	cookie := adminLoginCookie(t, handler, "test-admin-token")
@@ -515,6 +521,9 @@ func TestAdminCanActivateSourceCandidates(t *testing.T) {
 	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
 	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
 	insertWebSourceCandidate(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'candidates_ready', discovery_count = 1 WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source candidates_ready: %v", err)
+	}
 
 	handler := newTestHandler(conn)
 	cookie := adminLoginCookie(t, handler, "test-admin-token")
@@ -537,6 +546,45 @@ func TestAdminCanActivateSourceCandidates(t *testing.T) {
 	}
 	if pageCount != 1 {
 		t.Fatalf("expected activated source page, got %d", pageCount)
+	}
+}
+
+func TestAdminBlocksProcessingUndiscoveredSource(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{"csrf": {csrf}}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/process", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected process redirect, got %d: %s", response.Code, response.Body.String())
+	}
+
+	location := response.Header().Get("Location")
+	if !strings.Contains(location, "source+must+be+discovered+before+processing") {
+		t.Fatalf("expected guardrail error in redirect, got %q", location)
+	}
+
+	var runCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = ?", sourceID).Scan(&runCount); err != nil {
+		t.Fatalf("count source runs: %v", err)
+	}
+	if runCount != 0 {
+		t.Fatalf("expected no pipeline run, got %d", runCount)
 	}
 }
 
@@ -577,5 +625,50 @@ func TestAdminCanCreateNarrowerSourceFromNeedsScopeSource(t *testing.T) {
 	}
 	if sourceCount != 1 {
 		t.Fatalf("expected one narrower source, got %d", sourceCount)
+	}
+}
+
+func TestAdminBlocksNarrowerSourceWhenSourceDoesNotNeedScope(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'ready_to_process', discovery_count = 12 WHERE id = ?", sourceID); err != nil {
+		t.Fatalf("mark source ready_to_process: %v", err)
+	}
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{
+		"csrf": {csrf},
+		"url":  {"https://doc.rust-lang.org/stable/book"},
+	}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/create-source", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected create narrower source redirect, got %d: %s", response.Code, response.Body.String())
+	}
+
+	location := response.Header().Get("Location")
+	if !strings.Contains(location, "source+must+need+narrower+scope") {
+		t.Fatalf("expected guardrail error in redirect, got %q", location)
+	}
+
+	var sourceCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM topic_sources WHERE normalized_url = 'https://doc.rust-lang.org/stable/book'").Scan(&sourceCount); err != nil {
+		t.Fatalf("count narrower source: %v", err)
+	}
+	if sourceCount != 0 {
+		t.Fatalf("expected no narrower source, got %d", sourceCount)
 	}
 }

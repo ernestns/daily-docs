@@ -78,6 +78,10 @@ type adminSourceDetail struct {
 	DiscoveryRuns    []adminDiscoveryRunRow
 	Candidates       []adminCandidateRow
 	CandidateFilters adminCandidateFilters
+	CanDiscover      bool
+	CanProcess       bool
+	CanActivate      bool
+	CanCreateSource  bool
 }
 
 type adminRunDetail struct {
@@ -129,6 +133,14 @@ type adminDiscoveryRunRow struct {
 	DiscoveredCount int
 	DiscoverySample []string
 	DiscoveryError  string
+}
+
+type adminSourceActionState struct {
+	Status          string
+	DiscoveryCount  int
+	EligibleCount   int
+	ActivatedCount  int
+	ProcessingCount int
 }
 
 type adminCandidateFilters struct {
@@ -290,6 +302,10 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 
 	switch parts[1] {
 	case "discover":
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "discover"); err != nil {
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
 		count, err := a.discoverSourcePreview(r.Context(), sourceID)
 		if err != nil {
 			log.Printf("admin discover source failed source_id=%d error=%v", sourceID, err)
@@ -298,6 +314,10 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 		}
 		redirectAdminSource(w, r, sourceID, fmt.Sprintf("discovered %d candidate URLs", count), "")
 	case "process":
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "process"); err != nil {
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
 		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
 		if err != nil {
 			log.Printf("admin process source failed source_id=%d error=%v", sourceID, err)
@@ -306,6 +326,10 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 		}
 		redirectAdminSource(w, r, sourceID, fmt.Sprintf("processed source %d: %d eligible", sourceID, result.EligibleCount), "")
 	case "activate":
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "activate"); err != nil {
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
 		result, err := activation.ActivateSourceCandidates(r.Context(), a.db, sourceID)
 		if err != nil {
 			log.Printf("admin activate source failed source_id=%d error=%v", sourceID, err)
@@ -314,6 +338,10 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 		}
 		redirectAdminSource(w, r, sourceID, fmt.Sprintf("activated %d candidates", result.Activated), "")
 	case "create-source":
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "create-source"); err != nil {
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
 		current, err := topicsource.Load(r.Context(), a.db, sourceID)
 		if err != nil {
 			log.Printf("admin load source failed source_id=%d error=%v", sourceID, err)
@@ -363,6 +391,10 @@ func (a app) adminSourcesHandler(w http.ResponseWriter, r *http.Request, token s
 		}
 		sourceID, err := parsePositiveID(r.Form.Get("source_id"), "source-id")
 		if err != nil {
+			redirectAdminSources(w, r, "", err.Error())
+			return
+		}
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "process"); err != nil {
 			redirectAdminSources(w, r, "", err.Error())
 			return
 		}
@@ -532,6 +564,10 @@ func (a app) adminSubmissionHandler(w http.ResponseWriter, r *http.Request, toke
 			redirectAdminSubmission(w, r, submissionID, "", "source does not belong to submission")
 			return
 		}
+		if err := adminEnsureSourceAction(r.Context(), a.db, sourceID, "process"); err != nil {
+			redirectAdminSubmission(w, r, submissionID, "", err.Error())
+			return
+		}
 		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
 		if err != nil {
 			log.Printf("admin process source failed submission_id=%d source_id=%d error=%v", submissionID, sourceID, err)
@@ -645,6 +681,69 @@ func hasEligibleCandidates(candidates []adminCandidateRow) bool {
 		}
 	}
 	return false
+}
+
+func adminEnsureSourceAction(ctx context.Context, conn *sql.DB, sourceID int64, action string) error {
+	state, err := adminGetSourceActionState(ctx, conn, sourceID)
+	if err != nil {
+		return err
+	}
+
+	switch action {
+	case "discover":
+		if !state.canDiscover() {
+			return fmt.Errorf("source cannot be discovered while status is %s", state.Status)
+		}
+	case "process":
+		if !state.canProcess() {
+			return fmt.Errorf("source must be discovered before processing")
+		}
+	case "activate":
+		if !state.canActivate() {
+			return fmt.Errorf("source has no eligible candidates to activate")
+		}
+	case "create-source":
+		if !state.canCreateSource() {
+			return fmt.Errorf("source must need narrower scope before adding a narrower source")
+		}
+	default:
+		return fmt.Errorf("unknown source action %q", action)
+	}
+	return nil
+}
+
+func adminGetSourceActionState(ctx context.Context, conn *sql.DB, sourceID int64) (adminSourceActionState, error) {
+	var state adminSourceActionState
+	err := conn.QueryRowContext(ctx, `
+		SELECT
+			status,
+			discovery_count,
+			(SELECT COUNT(*) FROM page_candidates WHERE topic_source_id = topic_sources.id AND status = 'eligible'),
+			(SELECT COUNT(*) FROM page_candidates WHERE topic_source_id = topic_sources.id AND status = 'activated'),
+			(SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = topic_sources.id AND status = 'processing')
+		FROM topic_sources
+		WHERE id = ?
+	`, sourceID).Scan(&state.Status, &state.DiscoveryCount, &state.EligibleCount, &state.ActivatedCount, &state.ProcessingCount)
+	if err != nil {
+		return adminSourceActionState{}, fmt.Errorf("load source action state: %w", err)
+	}
+	return state, nil
+}
+
+func (s adminSourceActionState) canDiscover() bool {
+	return s.Status != "disabled" && s.Status != "processing" && s.ProcessingCount == 0
+}
+
+func (s adminSourceActionState) canProcess() bool {
+	return s.ProcessingCount == 0 && s.DiscoveryCount > 0 && (s.Status == "ready_to_process" || s.Status == "candidates_ready")
+}
+
+func (s adminSourceActionState) canActivate() bool {
+	return s.ProcessingCount == 0 && s.EligibleCount > 0 && (s.Status == "candidates_ready" || s.Status == "ready_to_process")
+}
+
+func (s adminSourceActionState) canCreateSource() bool {
+	return s.Status == "needs_scope"
 }
 
 func adminListSubmissions(ctx context.Context, conn *sql.DB) ([]adminSubmissionRow, error) {
@@ -840,10 +939,18 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64, filters a
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
+	actionState, err := adminGetSourceActionState(ctx, conn, sourceID)
+	if err != nil {
+		return adminSourceDetail{}, err
+	}
 	detail.Runs = runs
 	detail.DiscoveryRuns = discoveryRuns
 	detail.Candidates = candidates
 	detail.CandidateFilters = filters
+	detail.CanDiscover = actionState.canDiscover()
+	detail.CanProcess = actionState.canProcess()
+	detail.CanActivate = actionState.canActivate()
+	detail.CanCreateSource = actionState.canCreateSource()
 	detail.DiscoveryStatus = sourceDiscoveryStatus(detail.adminSourceRow)
 	detail.WorkflowStatus, detail.NextAction = sourceWorkflowStatus(detail.adminSourceRow, runs, candidates)
 	return detail, nil
