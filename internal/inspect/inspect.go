@@ -50,6 +50,9 @@ type CandidateSummary struct {
 	URL              string
 	Classification   string
 	Score            int
+	GateScore        sql.NullInt64
+	GatePageType     string
+	RejectStage      string
 	Status           string
 	EstimatedMinutes sql.NullInt64
 	Reason           string
@@ -155,7 +158,8 @@ func WriteRuns(ctx context.Context, conn *sql.DB, out io.Writer, submissionID in
 
 func WriteCandidates(ctx context.Context, conn *sql.DB, out io.Writer, submissionID int64) error {
 	rows, err := conn.QueryContext(ctx, `
-		SELECT id, title, url, primary_classification, score, status, estimated_minutes, reason
+		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
+			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END
 		FROM page_candidates
 		WHERE documentation_submission_id = ?
 		ORDER BY score DESC, title ASC
@@ -166,13 +170,17 @@ func WriteCandidates(ctx context.Context, conn *sql.DB, out io.Writer, submissio
 	defer rows.Close()
 
 	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "ID\tSCORE\tSTATUS\tMIN\tCLASS\tTITLE\tURL\tREASON")
+	_, _ = fmt.Fprintln(writer, "ID\tSCORE\tGATE\tSTATUS\tSTAGE\tMIN\tCLASS\tTITLE\tURL\tREASON")
 	for rows.Next() {
 		var cand CandidateSummary
-		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &cand.Status, &cand.EstimatedMinutes, &cand.Reason); err != nil {
+		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &cand.GateScore, &cand.GatePageType, &cand.RejectStage, &cand.Status, &cand.EstimatedMinutes, &cand.Reason); err != nil {
 			return fmt.Errorf("scan candidate: %w", err)
 		}
-		_, _ = fmt.Fprintf(writer, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", cand.ID, cand.Score, cand.Status, nullInt(cand.EstimatedMinutes), cand.Classification, cand.Title, cand.URL, shorten(cand.Reason, 120))
+		gate := nullInt(cand.GateScore)
+		if cand.GatePageType != "" {
+			gate = gate + "/" + cand.GatePageType
+		}
+		_, _ = fmt.Fprintf(writer, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", cand.ID, cand.Score, gate, cand.Status, dash(cand.RejectStage), nullInt(cand.EstimatedMinutes), cand.Classification, cand.Title, cand.URL, shorten(cand.Reason, 120))
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate candidates: %w", err)

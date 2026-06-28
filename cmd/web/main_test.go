@@ -647,12 +647,25 @@ func adminDocsServer() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = fmt.Fprintf(w, `<!doctype html>
+		_, _ = fmt.Fprint(w, `<!doctype html>
 <html>
-<head><title>Rust Guide</title></head>
+<head><title>Rust Documentation</title></head>
 <body>
 <main>
-<h1>Rust Guide</h1>
+<h1>Rust Documentation</h1>
+<a href="/docs/ownership">Ownership</a>
+</main>
+</body>
+</html>`)
+	})
+	mux.HandleFunc("/docs/ownership", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!doctype html>
+<html>
+<head><title>Ownership Guide</title></head>
+<body>
+<main>
+<h1>Ownership Guide</h1>
 <h2>Overview</h2>
 <p>%s</p>
 <h2>Ownership</h2>

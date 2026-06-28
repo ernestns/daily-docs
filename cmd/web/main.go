@@ -30,6 +30,7 @@ import (
 	"github.com/ernestns/daily-docs/internal/reading"
 	"github.com/ernestns/daily-docs/internal/seed"
 	"github.com/ernestns/daily-docs/internal/submission"
+	"github.com/ernestns/daily-docs/internal/topicsource"
 	"github.com/ernestns/daily-docs/internal/validator"
 )
 
@@ -442,6 +443,8 @@ type adminCandidateRow struct {
 	URL              string
 	Classification   string
 	Score            int
+	Gate             string
+	RejectStage      string
 	Status           string
 	EstimatedMinutes string
 	Reason           string
@@ -692,7 +695,8 @@ func adminListRuns(ctx context.Context, conn *sql.DB, submissionID int64) ([]adm
 
 func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) ([]adminCandidateRow, error) {
 	rows, err := conn.QueryContext(ctx, `
-		SELECT id, title, url, primary_classification, score, status, estimated_minutes, reason
+		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
+			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END
 		FROM page_candidates
 		WHERE documentation_submission_id = ?
 		ORDER BY score DESC, title ASC
@@ -706,8 +710,20 @@ func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) 
 	for rows.Next() {
 		var cand adminCandidateRow
 		var estimated sql.NullInt64
-		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &cand.Status, &estimated, &cand.Reason); err != nil {
+		var gateScore sql.NullInt64
+		var gateReason string
+		if err := rows.Scan(&cand.ID, &cand.Title, &cand.URL, &cand.Classification, &cand.Score, &gateScore, &gateReason, &cand.RejectStage, &cand.Status, &estimated, &cand.Reason); err != nil {
 			return nil, fmt.Errorf("scan admin candidate: %w", err)
+		}
+		cand.Gate = "-"
+		if gateScore.Valid {
+			cand.Gate = strconv.FormatInt(gateScore.Int64, 10)
+		}
+		if gateReason != "" {
+			cand.Gate += "/" + gateReason
+		}
+		if cand.RejectStage == "" {
+			cand.RejectStage = "-"
 		}
 		cand.EstimatedMinutes = "-"
 		if estimated.Valid {
@@ -1543,10 +1559,10 @@ var adminSubmissionDetailTemplate = template.Must(template.New("admin-submission
       <h2>Candidates</h2>
       {{if .Submission.Candidates}}
       <table>
-        <thead><tr><th>ID</th><th>Score</th><th>Status</th><th>Min</th><th>Class</th><th>Title</th><th>URL</th><th>Reason</th></tr></thead>
+        <thead><tr><th>ID</th><th>Score</th><th>Gate</th><th>Status</th><th>Stage</th><th>Min</th><th>Class</th><th>Title</th><th>URL</th><th>Reason</th></tr></thead>
         <tbody>
           {{range .Submission.Candidates}}
-          <tr><td>{{.ID}}</td><td>{{.Score}}</td><td>{{.Status}}</td><td>{{.EstimatedMinutes}}</td><td>{{.Classification}}</td><td>{{.Title}}</td><td class="url">{{.URL}}</td><td>{{.Reason}}</td></tr>
+          <tr><td>{{.ID}}</td><td>{{.Score}}</td><td>{{.Gate}}</td><td>{{.Status}}</td><td>{{.RejectStage}}</td><td>{{.EstimatedMinutes}}</td><td>{{.Classification}}</td><td>{{.Title}}</td><td class="url">{{.URL}}</td><td>{{.Reason}}</td></tr>
           {{end}}
         </tbody>
       </table>
@@ -1628,6 +1644,127 @@ func runCommand(ctx context.Context, args []string) error {
 
 		log.Printf("processed submission id=%d run_id=%d discovered=%d crawled=%d eligible=%d rejected=%d failed=%d", result.SubmissionID, result.PipelineRunID, result.DiscoveredCount, result.CrawledCount, result.EligibleCount, result.RejectedCount, result.FailureCount)
 		return nil
+	case "create-source-from-submission":
+		if len(args) < 3 || len(args) > 4 {
+			return fmt.Errorf("usage: dailydocs create-source-from-submission submission-id topic-slug [topic-name]")
+		}
+		submissionID, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil || submissionID < 1 {
+			return fmt.Errorf("submission-id must be a positive integer")
+		}
+		topicName := ""
+		if len(args) == 4 {
+			topicName = args[3]
+		}
+
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		source, err := topicsource.CreateFromSubmission(ctx, conn, topicsource.CreateFromSubmissionInput{
+			SubmissionID: submissionID,
+			TopicSlug:    args[2],
+			TopicName:    topicName,
+		})
+		if err != nil {
+			return err
+		}
+		log.Printf("created topic source id=%d topic=%s url=%s", source.ID, source.TopicSlug, source.NormalizedURL)
+		return nil
+	case "list-sources":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: dailydocs list-sources")
+		}
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		return topicsource.WriteList(ctx, conn, os.Stdout)
+	case "process-source":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: dailydocs process-source source-id")
+		}
+		sourceID, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil || sourceID < 1 {
+			return fmt.Errorf("source-id must be a positive integer")
+		}
+
+		conn, err := db.Open(ctx, os.Getenv("DB_PATH"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		result, err := pipeline.ProcessSource(ctx, conn, sourceID, pipeline.Options{})
+		if err != nil {
+			return err
+		}
+
+		log.Printf("processed source id=%d submission_id=%d run_id=%d discovered=%d crawled=%d eligible=%d rejected=%d failed=%d", result.TopicSourceID, result.SubmissionID, result.PipelineRunID, result.DiscoveredCount, result.CrawledCount, result.EligibleCount, result.RejectedCount, result.FailureCount)
+		return nil
+	case "inspect-url":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: dailydocs inspect-url url")
+		}
+		result, err := pipeline.InspectURL(ctx, args[1], pipeline.Options{})
+		if err != nil {
+			return err
+		}
+		return writePrettyJSON(os.Stdout, result)
+	case "discover-url":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: dailydocs discover-url url")
+		}
+		result, err := pipeline.DiscoverURL(ctx, args[1], pipeline.Options{})
+		if err != nil {
+			return err
+		}
+		return writePrettyJSON(os.Stdout, result)
+	case "gate-url":
+		showRequest := false
+		showResponse := false
+		var rawURL string
+		for _, arg := range args[1:] {
+			switch arg {
+			case "--show-request":
+				showRequest = true
+			case "--show-response":
+				showResponse = true
+			default:
+				if rawURL != "" {
+					return fmt.Errorf("usage: dailydocs gate-url [--show-request] [--show-response] url")
+				}
+				rawURL = arg
+			}
+		}
+		if rawURL == "" {
+			return fmt.Errorf("usage: dailydocs gate-url [--show-request] [--show-response] url")
+		}
+		result, err := pipeline.GateURL(ctx, rawURL, pipeline.Options{}, showResponse)
+		if err != nil {
+			if showRequest && result.Request != nil {
+				_ = writePrettyJSON(os.Stdout, map[string]any{"request": result.Request})
+			}
+			return err
+		}
+		output := map[string]any{
+			"review": result.Review,
+		}
+		if showRequest {
+			output["request"] = result.Request
+		}
+		if showResponse {
+			var raw any
+			if len(result.Response) > 0 && json.Unmarshal(result.Response, &raw) == nil {
+				output["response"] = raw
+			} else {
+				output["response"] = string(result.Response)
+			}
+		}
+		return writePrettyJSON(os.Stdout, output)
 	case "activate-candidates":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: dailydocs activate-candidates submission-id")
@@ -1750,4 +1887,10 @@ func parsePositiveID(value string, name string) (int64, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
 	return id, nil
+}
+
+func writePrettyJSON(out *os.File, value any) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
