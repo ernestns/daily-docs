@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -51,17 +52,21 @@ type adminSubmissionDetail struct {
 }
 
 type adminSourceRow struct {
-	ID              int64
-	SubmissionID    int64
-	TopicID         int64
-	TopicSlug       string
-	TopicName       string
-	Status          string
-	SourceType      string
-	BaseURL         string
-	NormalizedURL   string
-	LastProcessedAt string
-	LastError       string
+	ID               int64
+	SubmissionID     int64
+	TopicID          int64
+	TopicSlug        string
+	TopicName        string
+	Status           string
+	SourceType       string
+	BaseURL          string
+	NormalizedURL    string
+	LastProcessedAt  string
+	LastError        string
+	LastDiscoveredAt string
+	DiscoveryCount   int
+	DiscoverySample  []string
+	DiscoveryError   string
 }
 
 type adminSourceDetail struct {
@@ -212,6 +217,37 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 	}
 
 	switch parts[1] {
+	case "discover":
+		source, err := topicsource.Load(r.Context(), a.db, sourceID)
+		if err != nil {
+			log.Printf("admin load source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		discovery, err := pipeline.DiscoverURL(r.Context(), source.NormalizedURL, pipeline.Options{MaxPages: 50, MaxDepth: 2})
+		preview := topicsource.DiscoveryPreview{}
+		if err != nil {
+			preview.Error = err.Error()
+			var tooBroad pipeline.DiscoveryTooBroadError
+			if errors.As(err, &tooBroad) {
+				preview.Count = tooBroad.Count
+				preview.NeedsScope = true
+			}
+			if recordErr := topicsource.RecordDiscoveryPreview(r.Context(), a.db, sourceID, preview); recordErr != nil {
+				log.Printf("admin record discovery preview failed source_id=%d error=%v", sourceID, recordErr)
+			}
+			log.Printf("admin discover source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		preview.Count = discovery.DiscoveredCount
+		preview.Sample = discovery.URLs
+		if err := topicsource.RecordDiscoveryPreview(r.Context(), a.db, sourceID, preview); err != nil {
+			log.Printf("admin record discovery preview failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSource(w, r, sourceID, "", err.Error())
+			return
+		}
+		redirectAdminSource(w, r, sourceID, fmt.Sprintf("discovered %d candidate URLs", discovery.DiscoveredCount), "")
 	case "process":
 		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
 		if err != nil {
@@ -627,6 +663,7 @@ func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, e
 
 func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSourceDetail, error) {
 	var detail adminSourceDetail
+	var discoverySample string
 	err := conn.QueryRowContext(ctx, `
 		SELECT
 			ts.id,
@@ -639,11 +676,15 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSou
 			ts.base_url,
 			ts.normalized_url,
 			COALESCE(ts.last_processed_at, ''),
-			ts.last_error
+			ts.last_error,
+			COALESCE(ts.last_discovered_at, ''),
+			ts.discovery_count,
+			ts.discovery_sample,
+			ts.discovery_error
 		FROM topic_sources ts
 		JOIN topics t ON t.id = ts.topic_id
 		WHERE ts.id = ?
-	`, sourceID).Scan(&detail.ID, &detail.SubmissionID, &detail.TopicID, &detail.TopicSlug, &detail.TopicName, &detail.Status, &detail.SourceType, &detail.BaseURL, &detail.NormalizedURL, &detail.LastProcessedAt, &detail.LastError)
+	`, sourceID).Scan(&detail.ID, &detail.SubmissionID, &detail.TopicID, &detail.TopicSlug, &detail.TopicName, &detail.Status, &detail.SourceType, &detail.BaseURL, &detail.NormalizedURL, &detail.LastProcessedAt, &detail.LastError, &detail.LastDiscoveredAt, &detail.DiscoveryCount, &discoverySample, &detail.DiscoveryError)
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
@@ -652,6 +693,12 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSou
 	}
 	if detail.LastError == "" {
 		detail.LastError = "-"
+	}
+	if detail.LastDiscoveredAt == "" {
+		detail.LastDiscoveredAt = "-"
+	}
+	if discoverySample != "" {
+		_ = json.Unmarshal([]byte(discoverySample), &detail.DiscoverySample)
 	}
 
 	runs, err := adminListSourceRuns(ctx, conn, sourceID)

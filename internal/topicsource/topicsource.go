@@ -3,6 +3,7 @@ package topicsource
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,13 @@ type Source struct {
 	CreatedFromSubmissionID sql.NullInt64
 	LastProcessedAt         sql.NullString
 	LastError               string
+}
+
+type DiscoveryPreview struct {
+	Count      int
+	Sample     []string
+	Error      string
+	NeedsScope bool
 }
 
 type CreateFromSubmissionInput struct {
@@ -200,6 +208,39 @@ func Load(ctx context.Context, conn *sql.DB, id int64) (Source, error) {
 		return Source{}, fmt.Errorf("load topic source: %w", err)
 	}
 	return src, nil
+}
+
+func RecordDiscoveryPreview(ctx context.Context, conn *sql.DB, sourceID int64, preview DiscoveryPreview) error {
+	if sourceID < 1 {
+		return errors.New("source id must be positive")
+	}
+	sample := preview.Sample
+	if len(sample) > 20 {
+		sample = sample[:20]
+	}
+	encodedSample, err := json.Marshal(sample)
+	if err != nil {
+		return fmt.Errorf("encode discovery sample: %w", err)
+	}
+
+	status := ""
+	if preview.NeedsScope {
+		status = "needs_scope"
+	}
+	_, err = conn.ExecContext(ctx, `
+		UPDATE topic_sources
+		SET status = CASE WHEN ? = '' THEN status ELSE ? END,
+			last_discovered_at = datetime('now'),
+			discovery_count = ?,
+			discovery_sample = ?,
+			discovery_error = ?,
+			updated_at = datetime('now')
+		WHERE id = ?
+	`, status, status, preview.Count, string(encodedSample), preview.Error, sourceID)
+	if err != nil {
+		return fmt.Errorf("record discovery preview: %w", err)
+	}
+	return nil
 }
 
 func WriteList(ctx context.Context, conn *sql.DB, out io.Writer) error {

@@ -291,6 +291,69 @@ func TestAdminCanProcessSourceFromSourcesPage(t *testing.T) {
 	}
 }
 
+func TestAdminCanDiscoverSourceWithoutProcessing(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	server := adminDocsServer()
+	defer server.Close()
+	submissionID := insertWebSubmission(t, ctx, conn, server.URL+"/docs", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{"csrf": {csrf}}
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/sources/%d/discover", sourceID), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected discover redirect, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var discovered int
+	var sample string
+	if err := conn.QueryRowContext(ctx, "SELECT discovery_count, discovery_sample FROM topic_sources WHERE id = ?", sourceID).Scan(&discovered, &sample); err != nil {
+		t.Fatalf("read source discovery preview: %v", err)
+	}
+	if discovered == 0 {
+		t.Fatalf("expected discovered URLs")
+	}
+	if !strings.Contains(sample, "/docs/ownership") {
+		t.Fatalf("expected ownership URL in discovery sample, got %q", sample)
+	}
+
+	var runCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = ?", sourceID).Scan(&runCount); err != nil {
+		t.Fatalf("count source runs: %v", err)
+	}
+	if runCount != 0 {
+		t.Fatalf("expected discovery not to create pipeline runs, got %d", runCount)
+	}
+
+	detailRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/sources/%d", sourceID), nil)
+	detailRequest.AddCookie(cookie)
+	detailResponse := httptest.NewRecorder()
+	handler.ServeHTTP(detailResponse, detailRequest)
+
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("expected detail 200, got %d: %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	body := detailResponse.Body.String()
+	for _, expected := range []string{"Discovery Sample", "/docs/ownership"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in source detail:\n%s", expected, body)
+		}
+	}
+}
+
 func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "test-admin-token")
 

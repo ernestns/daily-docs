@@ -34,6 +34,10 @@
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
+    <form method="post" action="/admin/sources/{{.Source.ID}}/discover">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button type="submit">Discover</button>
+    </form>
     <form method="post" action="/admin/sources/{{.Source.ID}}/process">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">Process</button>
@@ -51,11 +55,28 @@
         <dt>Type</dt><dd>{{.Source.SourceType}}</dd>
         <dt>Base URL</dt><dd class="url">{{.Source.BaseURL}}</dd>
         <dt>Normalized URL</dt><dd class="url">{{.Source.NormalizedURL}}</dd>
+        <dt>Last discovered</dt><dd>{{.Source.LastDiscoveredAt}}</dd>
+        <dt>Discovered URLs</dt><dd>{{.Source.DiscoveryCount}}</dd>
+        <dt>Discovery error</dt><dd>{{if .Source.DiscoveryError}}{{.Source.DiscoveryError}}{{else}}-{{end}}</dd>
         <dt>Last processed</dt><dd>{{.Source.LastProcessedAt}}</dd>
         <dt>Last error</dt><dd>{{.Source.LastError}}</dd>
         <dt>Submission</dt><dd>{{if .Source.SubmissionID}}<a href="/admin/submissions/{{.Source.SubmissionID}}">{{.Source.SubmissionID}}</a>{{else}}-{{end}}</dd>
       </dl>
     </section>
+
+    {{if .Source.DiscoverySample}}
+    <section>
+      <h2>Discovery Sample</h2>
+      <table>
+        <thead><tr><th>URL</th></tr></thead>
+        <tbody>
+          {{range .Source.DiscoverySample}}
+          <tr><td class="url">{{.}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </section>
+    {{end}}
 
     {{if eq .Source.Status "needs_scope"}}
     <section>
