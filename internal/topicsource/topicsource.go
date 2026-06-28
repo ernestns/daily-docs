@@ -238,7 +238,15 @@ func RecordDiscoveryPreview(ctx context.Context, conn *sql.DB, sourceID int64, p
 	} else if preview.Error != "" {
 		status = "discovery_failed"
 	}
-	_, err = conn.ExecContext(ctx, `
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin discovery preview record: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE topic_sources
 		SET status = CASE WHEN status = 'disabled' THEN status ELSE ? END,
 			last_discovered_at = datetime('now'),
@@ -250,6 +258,24 @@ func RecordDiscoveryPreview(ctx context.Context, conn *sql.DB, sourceID int64, p
 	`, status, preview.Count, string(encodedSample), preview.Error, sourceID)
 	if err != nil {
 		return fmt.Errorf("record discovery preview: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO source_discovery_runs (
+			topic_source_id,
+			status,
+			discovered_count,
+			discovery_sample,
+			discovery_error
+		)
+		VALUES (?, ?, ?, ?, ?)
+	`, sourceID, status, preview.Count, string(encodedSample), preview.Error)
+	if err != nil {
+		return fmt.Errorf("record discovery history: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit discovery preview record: %w", err)
 	}
 	return nil
 }

@@ -50,6 +50,52 @@ func TestCreateFromSubmissionCreatesTopicSource(t *testing.T) {
 	}
 }
 
+func TestRecordDiscoveryPreviewStoresLatestAndHistory(t *testing.T) {
+	ctx := context.Background()
+	conn := openTestDB(t, ctx)
+	defer conn.Close()
+
+	sub, err := submission.Create(ctx, conn, submission.CreateInput{
+		URL:            "https://doc.rust-lang.org/stable/book/",
+		SuggestedTopic: "Rust",
+	})
+	if err != nil {
+		t.Fatalf("create submission: %v", err)
+	}
+
+	source, err := CreateFromSubmission(ctx, conn, CreateFromSubmissionInput{
+		SubmissionID: sub.ID,
+		TopicSlug:    "rust",
+		TopicName:    "Rust",
+	})
+	if err != nil {
+		t.Fatalf("create topic source: %v", err)
+	}
+
+	if err := RecordDiscoveryPreview(ctx, conn, source.ID, DiscoveryPreview{
+		Count:  2,
+		Sample: []string{"https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html"},
+	}); err != nil {
+		t.Fatalf("record discovery preview: %v", err)
+	}
+
+	var sourceCount int
+	var historyCount int
+	var status string
+	if err := conn.QueryRowContext(ctx, "SELECT status, discovery_count FROM topic_sources WHERE id = ?", source.ID).Scan(&status, &sourceCount); err != nil {
+		t.Fatalf("read source discovery preview: %v", err)
+	}
+	if status != "ready_to_process" || sourceCount != 2 {
+		t.Fatalf("expected latest preview on source, got status=%q count=%d", status, sourceCount)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM source_discovery_runs WHERE topic_source_id = ?", source.ID).Scan(&historyCount); err != nil {
+		t.Fatalf("count discovery history: %v", err)
+	}
+	if historyCount != 1 {
+		t.Fatalf("expected one history row, got %d", historyCount)
+	}
+}
+
 func openTestDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 

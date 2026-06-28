@@ -75,6 +75,7 @@ type adminSourceRow struct {
 type adminSourceDetail struct {
 	adminSourceRow
 	Runs             []adminRunRow
+	DiscoveryRuns    []adminDiscoveryRunRow
 	Candidates       []adminCandidateRow
 	CandidateFilters adminCandidateFilters
 }
@@ -119,6 +120,15 @@ type adminCandidateRow struct {
 	ReviewModel      string
 	Confidence       string
 	Rationale        string
+}
+
+type adminDiscoveryRunRow struct {
+	ID              int64
+	Status          string
+	CreatedAt       string
+	DiscoveredCount int
+	DiscoverySample []string
+	DiscoveryError  string
 }
 
 type adminCandidateFilters struct {
@@ -822,16 +832,52 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64, filters a
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
+	discoveryRuns, err := adminListSourceDiscoveryRuns(ctx, conn, sourceID)
+	if err != nil {
+		return adminSourceDetail{}, err
+	}
 	candidates, err := adminListSourceCandidates(ctx, conn, sourceID, filters)
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
 	detail.Runs = runs
+	detail.DiscoveryRuns = discoveryRuns
 	detail.Candidates = candidates
 	detail.CandidateFilters = filters
 	detail.DiscoveryStatus = sourceDiscoveryStatus(detail.adminSourceRow)
 	detail.WorkflowStatus, detail.NextAction = sourceWorkflowStatus(detail.adminSourceRow, runs, candidates)
 	return detail, nil
+}
+
+func adminListSourceDiscoveryRuns(ctx context.Context, conn *sql.DB, sourceID int64) ([]adminDiscoveryRunRow, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT id, status, created_at, discovered_count, discovery_sample, discovery_error
+		FROM source_discovery_runs
+		WHERE topic_source_id = ?
+		ORDER BY id DESC
+		LIMIT 20
+	`, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("query admin source discovery runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []adminDiscoveryRunRow
+	for rows.Next() {
+		var run adminDiscoveryRunRow
+		var sample string
+		if err := rows.Scan(&run.ID, &run.Status, &run.CreatedAt, &run.DiscoveredCount, &sample, &run.DiscoveryError); err != nil {
+			return nil, fmt.Errorf("scan admin source discovery run: %w", err)
+		}
+		if sample != "" {
+			_ = json.Unmarshal([]byte(sample), &run.DiscoverySample)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate admin source discovery runs: %w", err)
+	}
+	return runs, nil
 }
 
 func adminListSourceRuns(ctx context.Context, conn *sql.DB, sourceID int64) ([]adminRunRow, error) {

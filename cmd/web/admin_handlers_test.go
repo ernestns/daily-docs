@@ -338,6 +338,14 @@ func TestAdminCanDiscoverSourceWithoutProcessing(t *testing.T) {
 		t.Fatalf("expected discovery not to create pipeline runs, got %d", runCount)
 	}
 
+	var historyCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM source_discovery_runs WHERE topic_source_id = ?", sourceID).Scan(&historyCount); err != nil {
+		t.Fatalf("count discovery history: %v", err)
+	}
+	if historyCount != 1 {
+		t.Fatalf("expected one discovery history row, got %d", historyCount)
+	}
+
 	detailRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/sources/%d", sourceID), nil)
 	detailRequest.AddCookie(cookie)
 	detailResponse := httptest.NewRecorder()
@@ -347,7 +355,7 @@ func TestAdminCanDiscoverSourceWithoutProcessing(t *testing.T) {
 		t.Fatalf("expected detail 200, got %d: %s", detailResponse.Code, detailResponse.Body.String())
 	}
 	body := detailResponse.Body.String()
-	for _, expected := range []string{"ready_to_process", "Discovery Sample", "/docs/ownership"} {
+	for _, expected := range []string{"ready_to_process", "Discovery Sample", "Discovery History", "/docs/ownership"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected %q in source detail:\n%s", expected, body)
 		}

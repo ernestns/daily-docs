@@ -81,6 +81,27 @@
     </section>
     {{end}}
 
+    <section>
+      <h2>Discovery History</h2>
+      {{if .Source.DiscoveryRuns}}
+      <table>
+        <thead><tr><th>ID</th><th>Status</th><th>Discovered</th><th>Created</th><th>Sample</th><th>Error</th></tr></thead>
+        <tbody>
+          {{range .Source.DiscoveryRuns}}
+          <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Status}}</td>
+            <td>{{.DiscoveredCount}}</td>
+            <td>{{.CreatedAt}}</td>
+            <td class="url">{{range .DiscoverySample}}{{.}}<br>{{end}}</td>
+            <td>{{if .DiscoveryError}}{{.DiscoveryError}}{{else}}-{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}<p>No discovery attempts.</p>{{end}}
+    </section>
+
     {{if eq .Source.Status "needs_scope"}}
     <section>
       <h2>Add Narrower Source</h2>
