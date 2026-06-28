@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+bruno/**/environments/Local.bru
+bruno/**/environments/*.local.bru
 
 # SQLite databases and local data
 *.db
@@ -13,6 +15,7 @@
 # Build outputs
 /bin/
 /dist/
+/.cache/
 
 # Logs and temporary files
 *.log
