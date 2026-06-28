@@ -15,6 +15,7 @@ var (
 	readingTemplate               = mustTemplate("templates/reading.html")
 	adminLoginTemplate            = mustTemplate("templates/admin_login.html")
 	adminSubmissionsTemplate      = mustTemplate("templates/admin_submissions.html")
+	adminSourcesTemplate          = mustTemplate("templates/admin_sources.html")
 	adminSubmissionDetailTemplate = mustTemplate("templates/admin_submission_detail.html")
 )
 

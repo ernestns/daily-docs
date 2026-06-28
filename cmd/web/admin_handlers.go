@@ -52,7 +52,9 @@ type adminSubmissionDetail struct {
 
 type adminSourceRow struct {
 	ID              int64
+	SubmissionID    int64
 	TopicSlug       string
+	TopicName       string
 	Status          string
 	SourceType      string
 	NormalizedURL   string
@@ -111,12 +113,58 @@ func (a app) adminHandler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/admin":
 		http.Redirect(w, r, "/admin/submissions", http.StatusSeeOther)
+	case path == "/admin/sources":
+		a.adminSourcesHandler(w, r, token)
 	case path == "/admin/submissions":
 		a.adminSubmissionsHandler(w, r, token)
 	case strings.HasPrefix(path, "/admin/submissions/"):
 		a.adminSubmissionHandler(w, r, token, path)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (a app) adminSourcesHandler(w http.ResponseWriter, r *http.Request, token string) {
+	switch r.Method {
+	case http.MethodGet:
+		sources, err := adminListAllSources(r.Context(), a.db)
+		if err != nil {
+			log.Printf("admin list sources failed: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		renderTemplate(w, adminSourcesTemplate, struct {
+			Sources []adminSourceRow
+			CSRF    string
+			Notice  string
+			Error   string
+		}{
+			Sources: sources,
+			CSRF:    csrfToken(r, token),
+			Notice:  r.URL.Query().Get("notice"),
+			Error:   r.URL.Query().Get("error"),
+		})
+	case http.MethodPost:
+		if !validCSRF(r, token) {
+			http.Error(w, "invalid csrf token", http.StatusForbidden)
+			return
+		}
+		sourceID, err := parsePositiveID(r.Form.Get("source_id"), "source-id")
+		if err != nil {
+			redirectAdminSources(w, r, "", err.Error())
+			return
+		}
+		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
+		if err != nil {
+			log.Printf("admin process source failed source_id=%d error=%v", sourceID, err)
+			redirectAdminSources(w, r, "", err.Error())
+			return
+		}
+		redirectAdminSources(w, r, fmt.Sprintf("processed source %d: %d eligible", sourceID, result.EligibleCount), "")
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -365,6 +413,7 @@ func adminListSources(ctx context.Context, conn *sql.DB, submissionID int64) ([]
 		if err := rows.Scan(&source.ID, &source.TopicSlug, &source.Status, &source.SourceType, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
 			return nil, fmt.Errorf("scan admin source: %w", err)
 		}
+		source.SubmissionID = submissionID
 		if source.LastProcessedAt == "" {
 			source.LastProcessedAt = "-"
 		}
@@ -375,6 +424,47 @@ func adminListSources(ctx context.Context, conn *sql.DB, submissionID int64) ([]
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate admin sources: %w", err)
+	}
+	return sources, nil
+}
+
+func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT
+			ts.id,
+			COALESCE(ts.created_from_submission_id, 0),
+			t.slug,
+			t.name,
+			ts.status,
+			ts.source_type,
+			ts.normalized_url,
+			COALESCE(ts.last_processed_at, ''),
+			ts.last_error
+		FROM topic_sources ts
+		JOIN topics t ON t.id = ts.topic_id
+		ORDER BY ts.id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query admin all sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []adminSourceRow
+	for rows.Next() {
+		var source adminSourceRow
+		if err := rows.Scan(&source.ID, &source.SubmissionID, &source.TopicSlug, &source.TopicName, &source.Status, &source.SourceType, &source.NormalizedURL, &source.LastProcessedAt, &source.LastError); err != nil {
+			return nil, fmt.Errorf("scan admin all source: %w", err)
+		}
+		if source.LastProcessedAt == "" {
+			source.LastProcessedAt = "-"
+		}
+		if source.LastError == "" {
+			source.LastError = "-"
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate admin all sources: %w", err)
 	}
 	return sources, nil
 }
@@ -463,6 +553,21 @@ func redirectAdminSubmission(w http.ResponseWriter, r *http.Request, submissionI
 		values.Set("error", errorMessage)
 	}
 	target := fmt.Sprintf("/admin/submissions/%d", submissionID)
+	if encoded := values.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func redirectAdminSources(w http.ResponseWriter, r *http.Request, notice string, errorMessage string) {
+	values := url.Values{}
+	if notice != "" {
+		values.Set("notice", notice)
+	}
+	if errorMessage != "" {
+		values.Set("error", errorMessage)
+	}
+	target := "/admin/sources"
 	if encoded := values.Encode(); encoded != "" {
 		target += "?" + encoded
 	}

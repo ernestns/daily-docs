@@ -214,3 +214,79 @@ func TestAdminCanCreateTopicSourceFromSubmission(t *testing.T) {
 		t.Fatalf("expected source URL in detail:\n%s", body)
 	}
 }
+
+func TestAdminSourcesListsTopicSources(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	request := httptest.NewRequest(http.MethodGet, "/admin/sources", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		"Sources",
+		"Rust",
+		"https://doc.rust-lang.org/stable/book",
+		fmt.Sprintf(`/admin/submissions/%d`, submissionID),
+		fmt.Sprintf(`value="%d"`, sourceID),
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in sources page:\n%s", expected, body)
+		}
+	}
+}
+
+func TestAdminCanProcessSourceFromSourcesPage(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	server := adminDocsServer()
+	defer server.Close()
+	submissionID := insertWebSubmission(t, ctx, conn, server.URL+"/docs", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	csrf := adminCSRFToken(t, handler, cookie, submissionID)
+
+	form := url.Values{
+		"csrf":      {csrf},
+		"source_id": {fmt.Sprintf("%d", sourceID)},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/admin/sources", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected process source redirect, got %d: %s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); !strings.HasPrefix(location, "/admin/sources?notice=") {
+		t.Fatalf("expected redirect to sources notice, got %q", location)
+	}
+
+	var runCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = ?", sourceID).Scan(&runCount); err != nil {
+		t.Fatalf("count source runs: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("expected one source run, got %d", runCount)
+	}
+}

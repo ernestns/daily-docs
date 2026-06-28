@@ -14,6 +14,7 @@ import (
 
 	"github.com/ernestns/daily-docs/internal/db"
 	"github.com/ernestns/daily-docs/internal/seed"
+	"github.com/ernestns/daily-docs/internal/topicsource"
 )
 
 func newTestHandler(conn *sql.DB) http.Handler {
@@ -142,6 +143,20 @@ func insertWebSubmission(t *testing.T, ctx context.Context, conn *sql.DB, rawURL
 		t.Fatalf("read submission id: %v", err)
 	}
 	return id
+}
+
+func createWebTopicSource(t *testing.T, ctx context.Context, conn *sql.DB, submissionID int64, slug string, name string) int64 {
+	t.Helper()
+
+	source, err := topicsource.CreateFromSubmission(ctx, conn, topicsource.CreateFromSubmissionInput{
+		SubmissionID: submissionID,
+		TopicSlug:    slug,
+		TopicName:    name,
+	})
+	if err != nil {
+		t.Fatalf("create topic source: %v", err)
+	}
+	return source.ID
 }
 
 func adminDocsServer() *httptest.Server {
