@@ -337,6 +337,64 @@ func TestCreateSubmissionRedirectsAndStoresSubmission(t *testing.T) {
 	}
 }
 
+func TestCreateSubmissionForExistingTopicCreatesSourceAndDiscoveryPreview(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	importWebTopic(t, ctx, conn, "rust", "Rust")
+
+	server := adminDocsServer()
+	defer server.Close()
+
+	form := url.Values{}
+	form.Set("url", server.URL+"/docs")
+	form.Set("topic", "Rust")
+
+	handler := newTestHandler(conn)
+	request := httptest.NewRequest(http.MethodPost, "/submissions", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var sourceID int64
+	var discoveryCount int
+	var discoverySample string
+	var createdFrom int64
+	if err := conn.QueryRowContext(ctx, `
+		SELECT ts.id, ts.discovery_count, ts.discovery_sample, COALESCE(ts.created_from_submission_id, 0)
+		FROM topic_sources ts
+		JOIN topics t ON t.id = ts.topic_id
+		WHERE t.slug = 'rust'
+	`).Scan(&sourceID, &discoveryCount, &discoverySample, &createdFrom); err != nil {
+		t.Fatalf("read auto-created source: %v", err)
+	}
+	if sourceID < 1 {
+		t.Fatalf("expected source id")
+	}
+	if discoveryCount == 0 {
+		t.Fatalf("expected discovery preview count")
+	}
+	if !strings.Contains(discoverySample, "/docs/ownership") {
+		t.Fatalf("expected discovered ownership URL, got %q", discoverySample)
+	}
+	if createdFrom == 0 {
+		t.Fatalf("expected source to be linked to submission")
+	}
+
+	var runCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pipeline_runs WHERE topic_source_id = ?", sourceID).Scan(&runCount); err != nil {
+		t.Fatalf("count source runs: %v", err)
+	}
+	if runCount != 0 {
+		t.Fatalf("expected auto discovery not to create pipeline runs, got %d", runCount)
+	}
+}
+
 func TestSubmissionsPageShowsSafePublicFields(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)

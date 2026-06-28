@@ -43,9 +43,10 @@ type CreateFromSubmissionInput struct {
 }
 
 type CreateForTopicInput struct {
-	TopicID    int64
-	URL        string
-	SourceType string
+	TopicID      int64
+	URL          string
+	SourceType   string
+	SubmissionID int64
 }
 
 func CreateForTopic(ctx context.Context, conn *sql.DB, input CreateForTopicInput) (Source, error) {
@@ -69,16 +70,18 @@ func CreateForTopic(ctx context.Context, conn *sql.DB, input CreateForTopicInput
 			source_host,
 			source_type,
 			status,
+			created_from_submission_id,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))
+		VALUES (?, ?, ?, ?, ?, 'active', NULLIF(?, 0), datetime('now'))
 		ON CONFLICT(topic_id, normalized_url) DO UPDATE SET
 			base_url = excluded.base_url,
 			source_host = excluded.source_host,
 			source_type = excluded.source_type,
 			status = 'active',
+			created_from_submission_id = COALESCE(topic_sources.created_from_submission_id, excluded.created_from_submission_id),
 			updated_at = datetime('now')
-	`, input.TopicID, strings.TrimSpace(input.URL), normalizedURL, sourceHost, sourceType)
+	`, input.TopicID, strings.TrimSpace(input.URL), normalizedURL, sourceHost, sourceType, input.SubmissionID)
 	if err != nil {
 		return Source{}, fmt.Errorf("upsert topic source: %w", err)
 	}

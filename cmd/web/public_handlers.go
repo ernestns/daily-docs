@@ -17,6 +17,7 @@ import (
 
 	"github.com/ernestns/daily-docs/internal/reading"
 	"github.com/ernestns/daily-docs/internal/submission"
+	"github.com/ernestns/daily-docs/internal/topicsource"
 )
 
 func (a app) routeHandler(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +135,7 @@ func (a app) createSubmissionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := submission.Create(r.Context(), a.db, submission.CreateInput{
+	created, err := submission.Create(r.Context(), a.db, submission.CreateInput{
 		URL:            r.Form.Get("url"),
 		SuggestedTopic: r.Form.Get("topic"),
 		SubmitterIP:    clientIP(r),
@@ -150,7 +151,42 @@ func (a app) createSubmissionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.maybeCreateSourceAndDiscover(r.Context(), created)
+
 	http.Redirect(w, r, "/submissions", http.StatusSeeOther)
+}
+
+func (a app) maybeCreateSourceAndDiscover(ctx context.Context, sub submission.Submission) {
+	if strings.TrimSpace(sub.SuggestedTopic) == "" {
+		return
+	}
+	topic, ok, err := findTopic(ctx, a.db, sub.SuggestedTopic)
+	if err != nil {
+		log.Printf("auto source topic lookup failed submission_id=%d error=%v", sub.ID, err)
+		return
+	}
+	if !ok {
+		return
+	}
+	topicID, err := topicIDBySlug(ctx, a.db, topic.Slug)
+	if err != nil {
+		log.Printf("auto source topic id lookup failed submission_id=%d topic=%s error=%v", sub.ID, topic.Slug, err)
+		return
+	}
+	source, err := topicsource.CreateForTopic(ctx, a.db, topicsource.CreateForTopicInput{
+		TopicID:      topicID,
+		URL:          sub.NormalizedURL,
+		SubmissionID: sub.ID,
+	})
+	if err != nil {
+		log.Printf("auto source create failed submission_id=%d topic=%s error=%v", sub.ID, topic.Slug, err)
+		return
+	}
+	discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := a.discoverSourcePreview(discoverCtx, source.ID); err != nil {
+		log.Printf("auto source discovery failed submission_id=%d source_id=%d error=%v", sub.ID, source.ID, err)
+	}
 }
 
 func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +319,20 @@ func findTopic(ctx context.Context, conn *sql.DB, value string) (topicOption, bo
 		return topicOption{}, false, nil
 	}
 	return topicOption{}, false, fmt.Errorf("query topic: %w", err)
+}
+
+func topicIDBySlug(ctx context.Context, conn *sql.DB, slug string) (int64, error) {
+	var id int64
+	err := conn.QueryRowContext(ctx, `
+		SELECT id
+		FROM topics
+		WHERE slug = ?
+			AND status = 'active'
+	`, slug).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("query topic id: %w", err)
+	}
+	return id, nil
 }
 
 func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any) {

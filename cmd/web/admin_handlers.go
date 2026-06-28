@@ -67,6 +67,7 @@ type adminSourceRow struct {
 	DiscoveryCount   int
 	DiscoverySample  []string
 	DiscoveryError   string
+	DiscoveryStatus  string
 }
 
 type adminSourceDetail struct {
@@ -218,36 +219,13 @@ func (a app) adminSourceHandler(w http.ResponseWriter, r *http.Request, token st
 
 	switch parts[1] {
 	case "discover":
-		source, err := topicsource.Load(r.Context(), a.db, sourceID)
+		count, err := a.discoverSourcePreview(r.Context(), sourceID)
 		if err != nil {
-			log.Printf("admin load source failed source_id=%d error=%v", sourceID, err)
-			redirectAdminSource(w, r, sourceID, "", err.Error())
-			return
-		}
-		discovery, err := pipeline.DiscoverURL(r.Context(), source.NormalizedURL, pipeline.Options{MaxPages: 50, MaxDepth: 2})
-		preview := topicsource.DiscoveryPreview{}
-		if err != nil {
-			preview.Error = err.Error()
-			var tooBroad pipeline.DiscoveryTooBroadError
-			if errors.As(err, &tooBroad) {
-				preview.Count = tooBroad.Count
-				preview.NeedsScope = true
-			}
-			if recordErr := topicsource.RecordDiscoveryPreview(r.Context(), a.db, sourceID, preview); recordErr != nil {
-				log.Printf("admin record discovery preview failed source_id=%d error=%v", sourceID, recordErr)
-			}
 			log.Printf("admin discover source failed source_id=%d error=%v", sourceID, err)
 			redirectAdminSource(w, r, sourceID, "", err.Error())
 			return
 		}
-		preview.Count = discovery.DiscoveredCount
-		preview.Sample = discovery.URLs
-		if err := topicsource.RecordDiscoveryPreview(r.Context(), a.db, sourceID, preview); err != nil {
-			log.Printf("admin record discovery preview failed source_id=%d error=%v", sourceID, err)
-			redirectAdminSource(w, r, sourceID, "", err.Error())
-			return
-		}
-		redirectAdminSource(w, r, sourceID, fmt.Sprintf("discovered %d candidate URLs", discovery.DiscoveredCount), "")
+		redirectAdminSource(w, r, sourceID, fmt.Sprintf("discovered %d candidate URLs", count), "")
 	case "process":
 		result, err := pipeline.ProcessSource(r.Context(), a.db, sourceID, pipeline.Options{})
 		if err != nil {
@@ -519,6 +497,46 @@ func (a app) adminSubmissionDetailHandler(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (a app) discoverSourcePreview(ctx context.Context, sourceID int64) (int, error) {
+	source, err := topicsource.Load(ctx, a.db, sourceID)
+	if err != nil {
+		return 0, err
+	}
+	discovery, err := pipeline.DiscoverURL(ctx, source.NormalizedURL, pipeline.Options{MaxPages: 50, MaxDepth: 2})
+	preview := topicsource.DiscoveryPreview{}
+	if err != nil {
+		preview.Error = err.Error()
+		var tooBroad pipeline.DiscoveryTooBroadError
+		if errors.As(err, &tooBroad) {
+			preview.Count = tooBroad.Count
+			preview.NeedsScope = true
+		}
+		if recordErr := topicsource.RecordDiscoveryPreview(ctx, a.db, sourceID, preview); recordErr != nil {
+			log.Printf("record discovery preview failed source_id=%d error=%v", sourceID, recordErr)
+		}
+		return preview.Count, err
+	}
+	preview.Count = discovery.DiscoveredCount
+	preview.Sample = discovery.URLs
+	if err := topicsource.RecordDiscoveryPreview(ctx, a.db, sourceID, preview); err != nil {
+		return 0, err
+	}
+	return discovery.DiscoveredCount, nil
+}
+
+func sourceDiscoveryStatus(source adminSourceRow) string {
+	if source.DiscoveryError != "" {
+		if source.Status == "needs_scope" {
+			return "needs_scope"
+		}
+		return "discovery_failed"
+	}
+	if source.DiscoveryCount > 0 {
+		return "ready_to_process"
+	}
+	return "not_discovered"
+}
+
 func adminListSubmissions(ctx context.Context, conn *sql.DB) ([]adminSubmissionRow, error) {
 	rows, err := conn.QueryContext(ctx, `
 		SELECT id, suggested_topic, source_host, status, request_count, last_submitted_at, last_error
@@ -700,6 +718,7 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSou
 	if discoverySample != "" {
 		_ = json.Unmarshal([]byte(discoverySample), &detail.DiscoverySample)
 	}
+	detail.DiscoveryStatus = sourceDiscoveryStatus(detail.adminSourceRow)
 
 	runs, err := adminListSourceRuns(ctx, conn, sourceID)
 	if err != nil {

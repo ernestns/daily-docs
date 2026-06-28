@@ -347,7 +347,7 @@ func TestAdminCanDiscoverSourceWithoutProcessing(t *testing.T) {
 		t.Fatalf("expected detail 200, got %d: %s", detailResponse.Code, detailResponse.Body.String())
 	}
 	body := detailResponse.Body.String()
-	for _, expected := range []string{"Discovery Sample", "/docs/ownership"} {
+	for _, expected := range []string{"ready_to_process", "Discovery Sample", "/docs/ownership"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected %q in source detail:\n%s", expected, body)
 		}
