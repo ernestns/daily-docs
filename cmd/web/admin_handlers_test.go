@@ -392,6 +392,41 @@ func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestAdminSourceDetailFiltersCandidates(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
+	insertWebSourceCandidateWithStatus(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html", "eligible", 95, "concept")
+	insertWebSourceCandidateWithStatus(t, ctx, conn, submissionID, sourceID, runID, "Print", "https://doc.rust-lang.org/stable/book/print.html", "rejected", 30, "print_page")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/sources/%d?status=eligible&min_score=90&page_type=concept", sourceID), nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Ownership") {
+		t.Fatalf("expected eligible candidate:\n%s", body)
+	}
+	if strings.Contains(body, "Print") {
+		t.Fatalf("did not expect rejected print candidate:\n%s", body)
+	}
+	if !strings.Contains(body, `value="eligible" selected`) {
+		t.Fatalf("expected selected status filter:\n%s", body)
+	}
+}
+
 func TestAdminRunDetailShowsCandidatesAndTelemetry(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "test-admin-token")
 
@@ -426,6 +461,38 @@ func TestAdminRunDetailShowsCandidatesAndTelemetry(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected %q in run detail:\n%s", expected, body)
 		}
+	}
+}
+
+func TestAdminRunDetailFiltersCandidates(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
+	insertWebSourceCandidateWithStatus(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html", "eligible", 95, "concept")
+	insertWebSourceCandidateWithStatus(t, ctx, conn, submissionID, sourceID, runID, "Print", "https://doc.rust-lang.org/stable/book/print.html", "rejected", 30, "print_page")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/runs/%d?status=rejected&page_type=print_page", runID), nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Print") {
+		t.Fatalf("expected rejected print candidate:\n%s", body)
+	}
+	if strings.Contains(body, "Ownership") {
+		t.Fatalf("did not expect eligible ownership candidate:\n%s", body)
 	}
 }
 

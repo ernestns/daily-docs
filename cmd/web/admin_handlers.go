@@ -74,18 +74,21 @@ type adminSourceRow struct {
 
 type adminSourceDetail struct {
 	adminSourceRow
-	Runs       []adminRunRow
-	Candidates []adminCandidateRow
+	Runs             []adminRunRow
+	Candidates       []adminCandidateRow
+	CandidateFilters adminCandidateFilters
 }
 
 type adminRunDetail struct {
 	adminRunRow
-	SubmissionID int64
-	SourceID     int64
-	TopicSlug    string
-	TopicName    string
-	SourceURL    string
-	Candidates   []adminCandidateRow
+	SubmissionID      int64
+	SourceID          int64
+	TopicSlug         string
+	TopicName         string
+	SourceURL         string
+	Candidates        []adminCandidateRow
+	CandidateFilters  adminCandidateFilters
+	CandidateFilterQS string
 }
 
 type adminRunRow struct {
@@ -116,6 +119,61 @@ type adminCandidateRow struct {
 	ReviewModel      string
 	Confidence       string
 	Rationale        string
+}
+
+type adminCandidateFilters struct {
+	Status   string
+	PageType string
+	MinScore string
+}
+
+func adminCandidateFiltersFromQuery(values url.Values) adminCandidateFilters {
+	filters := adminCandidateFilters{
+		Status:   strings.TrimSpace(values.Get("status")),
+		PageType: strings.TrimSpace(values.Get("page_type")),
+		MinScore: strings.TrimSpace(values.Get("min_score")),
+	}
+	switch filters.Status {
+	case "", "eligible", "rejected", "activated":
+	default:
+		filters.Status = ""
+	}
+	if _, err := strconv.Atoi(filters.MinScore); filters.MinScore != "" && err != nil {
+		filters.MinScore = ""
+	}
+	return filters
+}
+
+func (f adminCandidateFilters) queryString() string {
+	values := url.Values{}
+	if f.Status != "" {
+		values.Set("status", f.Status)
+	}
+	if f.PageType != "" {
+		values.Set("page_type", f.PageType)
+	}
+	if f.MinScore != "" {
+		values.Set("min_score", f.MinScore)
+	}
+	return values.Encode()
+}
+
+func (f adminCandidateFilters) apply(sqlQuery string, args []any) (string, []any) {
+	if f.Status != "" {
+		sqlQuery += " AND status = ?"
+		args = append(args, f.Status)
+	}
+	if f.PageType != "" {
+		sqlQuery += " AND gate_page_type = ?"
+		args = append(args, f.PageType)
+	}
+	if f.MinScore != "" {
+		if minScore, err := strconv.Atoi(f.MinScore); err == nil {
+			sqlQuery += " AND score >= ?"
+			args = append(args, minScore)
+		}
+	}
+	return sqlQuery, args
 }
 
 func (a app) adminHandler(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +228,8 @@ func (a app) adminRunHandler(w http.ResponseWriter, r *http.Request, path string
 		http.NotFound(w, r)
 		return
 	}
-	detail, err := adminGetRun(r.Context(), a.db, runID)
+	filters := adminCandidateFiltersFromQuery(r.URL.Query())
+	detail, err := adminGetRun(r.Context(), a.db, runID, filters)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
@@ -311,7 +370,8 @@ func (a app) adminSourcesHandler(w http.ResponseWriter, r *http.Request, token s
 }
 
 func (a app) adminSourceDetailHandler(w http.ResponseWriter, r *http.Request, token string, sourceID int64) {
-	detail, err := adminGetSource(r.Context(), a.db, sourceID)
+	filters := adminCandidateFiltersFromQuery(r.URL.Query())
+	detail, err := adminGetSource(r.Context(), a.db, sourceID, filters)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
@@ -719,7 +779,7 @@ func adminListAllSources(ctx context.Context, conn *sql.DB) ([]adminSourceRow, e
 	return sources, nil
 }
 
-func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSourceDetail, error) {
+func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64, filters adminCandidateFilters) (adminSourceDetail, error) {
 	var detail adminSourceDetail
 	var discoverySample string
 	err := conn.QueryRowContext(ctx, `
@@ -762,12 +822,13 @@ func adminGetSource(ctx context.Context, conn *sql.DB, sourceID int64) (adminSou
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
-	candidates, err := adminListSourceCandidates(ctx, conn, sourceID)
+	candidates, err := adminListSourceCandidates(ctx, conn, sourceID, filters)
 	if err != nil {
 		return adminSourceDetail{}, err
 	}
 	detail.Runs = runs
 	detail.Candidates = candidates
+	detail.CandidateFilters = filters
 	detail.DiscoveryStatus = sourceDiscoveryStatus(detail.adminSourceRow)
 	detail.WorkflowStatus, detail.NextAction = sourceWorkflowStatus(detail.adminSourceRow, runs, candidates)
 	return detail, nil
@@ -787,7 +848,7 @@ func adminListSourceRuns(ctx context.Context, conn *sql.DB, sourceID int64) ([]a
 	return scanAdminRuns(rows)
 }
 
-func adminGetRun(ctx context.Context, conn *sql.DB, runID int64) (adminRunDetail, error) {
+func adminGetRun(ctx context.Context, conn *sql.DB, runID int64, filters adminCandidateFilters) (adminRunDetail, error) {
 	var detail adminRunDetail
 	var completed sql.NullString
 	var sourceID sql.NullInt64
@@ -840,11 +901,13 @@ func adminGetRun(ctx context.Context, conn *sql.DB, runID int64) (adminRunDetail
 	if completed.Valid && completed.String != "" {
 		detail.CompletedAt = completed.String
 	}
-	candidates, err := adminListRunCandidates(ctx, conn, runID)
+	candidates, err := adminListRunCandidates(ctx, conn, runID, filters)
 	if err != nil {
 		return adminRunDetail{}, err
 	}
 	detail.Candidates = candidates
+	detail.CandidateFilters = filters
+	detail.CandidateFilterQS = filters.queryString()
 	return detail, nil
 }
 
@@ -905,8 +968,8 @@ func adminListCandidates(ctx context.Context, conn *sql.DB, submissionID int64) 
 	return scanAdminCandidates(rows)
 }
 
-func adminListSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64) ([]adminCandidateRow, error) {
-	rows, err := conn.QueryContext(ctx, `
+func adminListSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64, filters adminCandidateFilters) ([]adminCandidateRow, error) {
+	sqlQuery := `
 		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
 			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END,
 			gate_input_tokens,
@@ -918,9 +981,11 @@ func adminListSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64
 			review_confidence,
 			review_rationale
 		FROM page_candidates
-		WHERE topic_source_id = ?
-		ORDER BY score DESC, title ASC
-	`, sourceID)
+		WHERE topic_source_id = ?`
+	args := []any{sourceID}
+	sqlQuery, args = filters.apply(sqlQuery, args)
+	sqlQuery += " ORDER BY score DESC, title ASC"
+	rows, err := conn.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query admin source candidates: %w", err)
 	}
@@ -928,8 +993,8 @@ func adminListSourceCandidates(ctx context.Context, conn *sql.DB, sourceID int64
 	return scanAdminCandidates(rows)
 }
 
-func adminListRunCandidates(ctx context.Context, conn *sql.DB, runID int64) ([]adminCandidateRow, error) {
-	rows, err := conn.QueryContext(ctx, `
+func adminListRunCandidates(ctx context.Context, conn *sql.DB, runID int64, filters adminCandidateFilters) ([]adminCandidateRow, error) {
+	sqlQuery := `
 		SELECT id, title, url, primary_classification, score, gate_score, gate_page_type, reject_stage, status, estimated_minutes,
 			CASE WHEN status = 'rejected' THEN reject_reason ELSE reason END,
 			gate_input_tokens,
@@ -941,9 +1006,11 @@ func adminListRunCandidates(ctx context.Context, conn *sql.DB, runID int64) ([]a
 			review_confidence,
 			review_rationale
 		FROM page_candidates
-		WHERE pipeline_run_id = ?
-		ORDER BY status ASC, score DESC, title ASC
-	`, runID)
+		WHERE pipeline_run_id = ?`
+	args := []any{runID}
+	sqlQuery, args = filters.apply(sqlQuery, args)
+	sqlQuery += " ORDER BY status ASC, score DESC, title ASC"
+	rows, err := conn.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query admin run candidates: %w", err)
 	}

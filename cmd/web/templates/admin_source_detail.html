@@ -19,7 +19,7 @@
     form { display: inline; margin-right: 0.5rem; }
     .source-form { display: grid; gap: 0.75rem; max-width: 42rem; margin: 0 0 1rem; }
     .source-form label { display: grid; gap: 0.35rem; color: #52606d; }
-    input { min-width: 0; padding: 0.6rem 0.75rem; border: 1px solid #cbd2d9; border-radius: 6px; font: inherit; color: #1f2933; background: #fff; }
+    input, select { min-width: 0; padding: 0.6rem 0.75rem; border: 1px solid #cbd2d9; border-radius: 6px; font: inherit; color: #1f2933; background: #fff; }
     button { padding: 0.6rem 0.85rem; border: 0; border-radius: 6px; font: inherit; color: #fff; background: #1f2933; cursor: pointer; }
     a { color: #1f2933; }
     .notice { color: #067647; }
@@ -111,6 +111,27 @@
 
     <section>
       <h2>Candidates</h2>
+      <form class="source-form" method="get" action="/admin/sources/{{.Source.ID}}">
+        <label>
+          Status
+          <select name="status">
+            <option value="">Any</option>
+            <option value="eligible" {{if eq .Source.CandidateFilters.Status "eligible"}}selected{{end}}>eligible</option>
+            <option value="rejected" {{if eq .Source.CandidateFilters.Status "rejected"}}selected{{end}}>rejected</option>
+            <option value="activated" {{if eq .Source.CandidateFilters.Status "activated"}}selected{{end}}>activated</option>
+          </select>
+        </label>
+        <label>
+          Page type
+          <input name="page_type" value="{{.Source.CandidateFilters.PageType}}" autocomplete="off" placeholder="concept">
+        </label>
+        <label>
+          Minimum score
+          <input name="min_score" value="{{.Source.CandidateFilters.MinScore}}" inputmode="numeric" autocomplete="off" placeholder="75">
+        </label>
+        <button type="submit">Filter</button>
+        <a href="/admin/sources/{{.Source.ID}}">Clear</a>
+      </form>
       {{if .Source.Candidates}}
       <table>
         <thead><tr><th>ID</th><th>Score</th><th>Gate</th><th>Status</th><th>Stage</th><th>Min</th><th>Class</th><th>Model</th><th>Confidence</th><th>Tokens</th><th>Title</th><th>URL</th><th>Reason</th><th>Rationale</th></tr></thead>

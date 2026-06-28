@@ -186,6 +186,11 @@ func insertWebSourceRun(t *testing.T, ctx context.Context, conn *sql.DB, submiss
 
 func insertWebSourceCandidate(t *testing.T, ctx context.Context, conn *sql.DB, submissionID int64, sourceID int64, runID int64, title string, rawURL string) {
 	t.Helper()
+	insertWebSourceCandidateWithStatus(t, ctx, conn, submissionID, sourceID, runID, title, rawURL, "eligible", 95, "concept")
+}
+
+func insertWebSourceCandidateWithStatus(t *testing.T, ctx context.Context, conn *sql.DB, submissionID int64, sourceID int64, runID int64, title string, rawURL string, status string, score int, pageType string) {
+	t.Helper()
 
 	_, err := conn.ExecContext(ctx, `
 		INSERT INTO page_candidates (
@@ -215,8 +220,8 @@ func insertWebSourceCandidate(t *testing.T, ctx context.Context, conn *sql.DB, s
 			estimated_minutes,
 			status
 		)
-		VALUES (?, ?, ?, 'rust', 'Rust', ?, ?, ?, 'Rust Documentation', 800, 95, 91, 'concept', '', 'gpt-5-nano', 0.93, 'Excellent daily reading.', 100, 20, 5, 120, 40, 1, 4, 'eligible')
-	`, submissionID, runID, sourceID, title, rawURL, rawURL)
+		VALUES (?, ?, ?, 'rust', 'Rust', ?, ?, ?, 'Rust Documentation', 800, ?, 91, ?, '', 'gpt-5-nano', 0.93, 'Excellent daily reading.', 100, 20, 5, 120, 40, 1, 4, ?)
+	`, submissionID, runID, sourceID, title, rawURL, rawURL, score, pageType, status)
 	if err != nil {
 		t.Fatalf("insert source candidate: %v", err)
 	}
