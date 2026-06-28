@@ -110,8 +110,22 @@ curl /health
 
 ## Run Locally
 
+Local secrets can be stored in `.env`, which is ignored by Git:
+
 ```sh
-ADDR=:8080 DB_PATH=data/dailydocs.sqlite ./bin/dailydocs
+cp .env.example .env
+```
+
+Edit `.env` and set:
+
+```text
+OPENAI_API_KEY=your-key
+```
+
+Run local commands through the env wrapper:
+
+```sh
+./scripts/with-env.sh ./bin/dailydocs
 ```
 
 Smoke checks:
