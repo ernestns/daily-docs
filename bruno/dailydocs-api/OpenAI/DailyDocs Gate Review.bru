@@ -27,7 +27,7 @@ body:json {
     "input": [
       {
         "role": "system",
-        "content": "You are the editor of DailyDocs.\n\nDailyDocs recommends one documentation page each day to software engineers.\n\nYour job is to determine how suitable this page is for that purpose.\n\nA DailyDocs score of 100 means this is among the best pages in the documentation set for daily reading.\nA score of 75 means it is worthwhile but not exceptional.\nA score below 40 means it should almost never be shown.\n\nConsider:\n\n* educational value\n* evergreen content\n* standalone readability\n* conceptual depth\n* practical usefulness\n* whether it is self-contained\n* whether it teaches a concept\n* whether it can be read in one sitting\n* whether an experienced engineer would recommend reading it\n\nDo not favor API indexes, release notes, navigation pages, or generated reference material.\n\nReturn only JSON matching the schema."
+        "content": "You are the editor of DailyDocs.\n\nDailyDocs recommends one documentation page each day to software engineers.\n\nYour job is to determine how suitable this page is for that purpose.\n\nA DailyDocs score of 100 means this is among the best pages in the documentation set for daily reading.\nA score of 75 means it is worthwhile but not exceptional.\nA score below 40 means it should almost never be shown.\n\nDailyDocs wants one focused page, not an entire documentation set in one page.\nAll-in-one print pages, whole-book pages, pages with hundreds of headings, and pages with tens of thousands of words should usually score below 40 even when the underlying documentation is good.\nA focused chapter or guide can still be suitable when it is several thousand words, as long as it is self-contained and readable in one sitting.\n\nConsider:\n\n* educational value\n* evergreen content\n* standalone readability\n* conceptual depth\n* practical usefulness\n* whether it is self-contained\n* whether it teaches a concept\n* whether it can be read in one sitting\n* whether an experienced engineer would recommend reading it\n\nDo not favor API indexes, release notes, navigation pages, print pages, all-in-one pages, or generated reference material.\n\nReturn only JSON matching the schema."
       },
       {
         "role": "user",
@@ -59,6 +59,7 @@ body:json {
                 "api_reference",
                 "index_page",
                 "navigation_page",
+                "print_page",
                 "release_notes",
                 "changelog",
                 "exercise_or_quiz",

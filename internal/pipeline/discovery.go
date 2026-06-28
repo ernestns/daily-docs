@@ -16,10 +16,11 @@ import (
 
 func discoverURLs(ctx context.Context, client *http.Client, sub sourceSubmission, opts Options) ([]string, error) {
 	type discoveryItem struct {
-		URL      string
-		Depth    int
-		Priority int
-		Sequence int
+		URL       string
+		Depth     int
+		Priority  int
+		Sequence  int
+		Candidate bool
 	}
 
 	maxCandidates := DefaultMaxDiscovered
@@ -48,10 +49,11 @@ func discoverURLs(ctx context.Context, client *http.Client, sub sourceSubmission
 			return discoveryItem{}, false
 		}
 		item := discoveryItem{
-			URL:      normalized,
-			Depth:    depth,
-			Priority: discoveryPriority(sub.NormalizedURL, normalized),
-			Sequence: sequence,
+			URL:       normalized,
+			Depth:     depth,
+			Priority:  discoveryPriority(sub.NormalizedURL, normalized),
+			Sequence:  sequence,
+			Candidate: !isCrawlOnlyNavigationURL(normalized),
 		}
 		sequence++
 		seen[normalized] = item
@@ -117,6 +119,9 @@ func discoverURLs(ctx context.Context, client *http.Client, sub sourceSubmission
 	}
 	urls := make([]string, 0, len(items))
 	for _, item := range items {
+		if !item.Candidate {
+			continue
+		}
 		urls = append(urls, item.URL)
 	}
 	sort.Strings(urls)
@@ -295,6 +300,20 @@ func isDiscoverableDocumentURL(raw string) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func isCrawlOnlyNavigationURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	name := strings.ToLower(path.Base(parsed.Path))
+	switch name {
+	case "toc.html", "sidebar.html", "nav.html":
+		return true
+	default:
+		return false
 	}
 }
 

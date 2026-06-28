@@ -206,10 +206,13 @@ func TestDiscoverURLFollowsEmbeddedNavigationFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover url: %v", err)
 	}
-	for _, expected := range []string{server.URL + "/docs/book/toc.html", server.URL + "/docs/book/chapter-1.html", server.URL + "/docs/book/chapter-2.html"} {
+	for _, expected := range []string{server.URL + "/docs/book/chapter-1.html", server.URL + "/docs/book/chapter-2.html"} {
 		if !containsString(result.URLs, expected) {
 			t.Fatalf("expected embedded navigation URL %q, got %v", expected, result.URLs)
 		}
+	}
+	if containsString(result.URLs, server.URL+"/docs/book/toc.html") {
+		t.Fatalf("did not expect crawl-only navigation URL, got %v", result.URLs)
 	}
 }
 
@@ -259,9 +262,12 @@ func TestDiscoverURLPrioritizesCurrentPageChildrenBeforeNoisySiblings(t *testing
 	if err != nil {
 		t.Fatalf("discover url: %v", err)
 	}
-	for _, expected := range []string{server.URL + "/docs/book/toc.html", server.URL + "/docs/book/chapter-1.html", server.URL + "/docs/book/chapter-2.html"} {
+	for _, expected := range []string{server.URL + "/docs/book/chapter-1.html", server.URL + "/docs/book/chapter-2.html"} {
 		if !containsString(result.URLs, expected) {
 			t.Fatalf("expected current page child URL %q before noisy siblings, got %v", expected, result.URLs)
 		}
+	}
+	if containsString(result.URLs, server.URL+"/docs/book/toc.html") {
+		t.Fatalf("did not expect crawl-only navigation URL, got %v", result.URLs)
 	}
 }

@@ -262,7 +262,7 @@ func loadTopicSource(ctx context.Context, conn *sql.DB, id int64) (sourceSubmiss
 		FROM topic_sources ts
 		JOIN topics t ON t.id = ts.topic_id
 		WHERE ts.id = ?
-			AND ts.status = 'active'
+			AND ts.status IN ('active', 'needs_scope')
 	`, id).Scan(&sub.TopicSourceID, &sub.ID, &sub.TopicID, &sub.TopicSlug, &sub.TopicName, &sub.SubmittedURL, &sub.NormalizedURL, &sub.SourceHost)
 	if err != nil {
 		return sourceSubmission{}, fmt.Errorf("load topic source: %w", err)
@@ -329,7 +329,8 @@ func markSubmissionFailed(ctx context.Context, conn *sql.DB, submissionID int64,
 func markTopicSourceProcessed(ctx context.Context, conn *sql.DB, sourceID int64) error {
 	_, err := conn.ExecContext(ctx, `
 		UPDATE topic_sources
-		SET last_processed_at = datetime('now'),
+		SET status = 'active',
+			last_processed_at = datetime('now'),
 			last_error = '',
 			updated_at = datetime('now')
 		WHERE id = ?

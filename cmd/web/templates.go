@@ -16,6 +16,7 @@ var (
 	adminLoginTemplate            = mustTemplate("templates/admin_login.html")
 	adminSubmissionsTemplate      = mustTemplate("templates/admin_submissions.html")
 	adminSourcesTemplate          = mustTemplate("templates/admin_sources.html")
+	adminRunDetailTemplate        = mustTemplate("templates/admin_run_detail.html")
 	adminSourceDetailTemplate     = mustTemplate("templates/admin_source_detail.html")
 	adminSubmissionDetailTemplate = mustTemplate("templates/admin_submission_detail.html")
 )

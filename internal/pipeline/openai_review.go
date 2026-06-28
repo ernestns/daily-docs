@@ -56,7 +56,7 @@ func gateSchema() map[string]any {
 			},
 			"page_type": map[string]any{
 				"type": "string",
-				"enum": []string{"tutorial", "guide", "concept", "reference_concept", "api_reference", "index_page", "navigation_page", "release_notes", "changelog", "exercise_or_quiz", "playground", "product_page", "too_thin", "mostly_links", "other"},
+				"enum": []string{"tutorial", "guide", "concept", "reference_concept", "api_reference", "index_page", "navigation_page", "print_page", "release_notes", "changelog", "exercise_or_quiz", "playground", "product_page", "too_thin", "mostly_links", "other"},
 			},
 		},
 		"required": []string{"dailydocs_score", "page_type"},
@@ -74,6 +74,10 @@ A DailyDocs score of 100 means this is among the best pages in the documentation
 A score of 75 means it is worthwhile but not exceptional.
 A score below 40 means it should almost never be shown.
 
+DailyDocs wants one focused page, not an entire documentation set in one page.
+All-in-one print pages, whole-book pages, pages with hundreds of headings, and pages with tens of thousands of words should usually score below 40 even when the underlying documentation is good.
+A focused chapter or guide can still be suitable when it is several thousand words, as long as it is self-contained and readable in one sitting.
+
 Consider:
 
 * educational value
@@ -86,7 +90,7 @@ Consider:
 * whether it can be read in one sitting
 * whether an experienced engineer would recommend reading it
 
-Do not favor API indexes, release notes, navigation pages, or generated reference material.
+Do not favor API indexes, release notes, navigation pages, print pages, all-in-one pages, or generated reference material.
 
 Return only JSON matching the schema.`
 }

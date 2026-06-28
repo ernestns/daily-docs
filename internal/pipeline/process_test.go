@@ -177,6 +177,9 @@ func TestProcessSourcePersistsSourceLinkedCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create topic source: %v", err)
 	}
+	if _, err := conn.ExecContext(ctx, "UPDATE topic_sources SET status = 'needs_scope', last_error = 'too broad' WHERE id = ?", source.ID); err != nil {
+		t.Fatalf("mark source needs scope: %v", err)
+	}
 
 	result, err := ProcessSource(ctx, conn, source.ID, Options{Client: server.Client()})
 	if err != nil {
@@ -207,12 +210,20 @@ func TestProcessSourcePersistsSourceLinkedCandidates(t *testing.T) {
 		t.Fatalf("expected source-linked candidates")
 	}
 
+	var status string
 	var processed sql.NullString
-	if err := conn.QueryRowContext(ctx, "SELECT last_processed_at FROM topic_sources WHERE id = ?", source.ID).Scan(&processed); err != nil {
+	var lastError string
+	if err := conn.QueryRowContext(ctx, "SELECT status, last_processed_at, last_error FROM topic_sources WHERE id = ?", source.ID).Scan(&status, &processed, &lastError); err != nil {
 		t.Fatalf("read source processed timestamp: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("expected source status active after successful processing, got %q", status)
 	}
 	if !processed.Valid || processed.String == "" {
 		t.Fatalf("expected source last_processed_at to be set")
+	}
+	if lastError != "" {
+		t.Fatalf("expected source last error cleared, got %q", lastError)
 	}
 }
 

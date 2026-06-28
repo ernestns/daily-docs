@@ -318,12 +318,50 @@ func TestAdminSourceDetailShowsRunsCandidatesAndTelemetry(t *testing.T) {
 		"Source",
 		"Rust",
 		"Ownership",
+		fmt.Sprintf(`/admin/runs/%d`, runID),
 		"gpt-5-nano",
 		"gate 100/20/5/120 enrich 40",
 		"Excellent daily reading.",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected %q in source detail:\n%s", expected, body)
+		}
+	}
+}
+
+func TestAdminRunDetailShowsCandidatesAndTelemetry(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "test-admin-token")
+
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	submissionID := insertWebSubmission(t, ctx, conn, "https://doc.rust-lang.org/stable/book", "Rust")
+	sourceID := createWebTopicSource(t, ctx, conn, submissionID, "rust", "Rust")
+	runID := insertWebSourceRun(t, ctx, conn, submissionID, sourceID)
+	insertWebSourceCandidate(t, ctx, conn, submissionID, sourceID, runID, "Ownership", "https://doc.rust-lang.org/stable/book/ch04-01-what-is-ownership.html")
+
+	handler := newTestHandler(conn)
+	cookie := adminLoginCookie(t, handler, "test-admin-token")
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/runs/%d", runID), nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		fmt.Sprintf("Run %d", runID),
+		fmt.Sprintf(`/admin/submissions/%d`, submissionID),
+		fmt.Sprintf(`/admin/sources/%d`, sourceID),
+		"Ownership",
+		"gpt-5-nano",
+		"gate 100/20/5/120 enrich 40",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in run detail:\n%s", expected, body)
 		}
 	}
 }

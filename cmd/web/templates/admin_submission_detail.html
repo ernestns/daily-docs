@@ -109,7 +109,7 @@
         <thead><tr><th>ID</th><th>Status</th><th>Started</th><th>Completed</th><th>Discovered</th><th>Crawled</th><th>Eligible</th><th>Rejected</th><th>Failed</th><th>Error</th></tr></thead>
         <tbody>
           {{range .Submission.Runs}}
-          <tr><td>{{.ID}}</td><td>{{.Status}}</td><td>{{.StartedAt}}</td><td>{{.CompletedAt}}</td><td>{{.DiscoveredCount}}</td><td>{{.CrawledCount}}</td><td>{{.EligibleCount}}</td><td>{{.RejectedCount}}</td><td>{{.FailureCount}}</td><td>{{if .Error}}{{.Error}}{{else}}-{{end}}</td></tr>
+          <tr><td><a href="/admin/runs/{{.ID}}">{{.ID}}</a></td><td>{{.Status}}</td><td>{{.StartedAt}}</td><td>{{.CompletedAt}}</td><td>{{.DiscoveredCount}}</td><td>{{.CrawledCount}}</td><td>{{.EligibleCount}}</td><td>{{.RejectedCount}}</td><td>{{.FailureCount}}</td><td>{{if .Error}}{{.Error}}{{else}}-{{end}}</td></tr>
           {{end}}
         </tbody>
       </table>
