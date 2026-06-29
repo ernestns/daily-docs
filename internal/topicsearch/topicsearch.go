@@ -387,27 +387,6 @@ func ExpireStaleRunningSearches(ctx context.Context, conn *sql.DB, now time.Time
 	}()
 
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE topics
-		SET status = 'failed',
-			updated_at = ?
-		WHERE status = 'searching'
-			AND id IN (
-				SELECT topic_id
-				FROM topic_search_runs
-				WHERE status = ?
-					AND started_at < ?
-			)
-			AND id NOT IN (
-				SELECT topic_id
-				FROM topic_search_runs
-				WHERE status = ?
-					AND started_at >= ?
-			)
-	`, formatTime(now), runStatusRunning, formatTime(cutoff), runStatusRunning, formatTime(cutoff)); err != nil {
-		return fmt.Errorf("expire stale search topics: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
 		UPDATE topic_search_runs
 		SET status = 'failed',
 			stage = '',
@@ -417,6 +396,20 @@ func ExpireStaleRunningSearches(ctx context.Context, conn *sql.DB, now time.Time
 			AND started_at < ?
 	`, formatTime(now), runStatusRunning, formatTime(cutoff)); err != nil {
 		return fmt.Errorf("expire stale running searches: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE topics
+		SET status = 'failed',
+			updated_at = ?
+		WHERE status = 'searching'
+			AND NOT EXISTS (
+				SELECT 1
+				FROM topic_search_runs
+				WHERE topic_search_runs.topic_id = topics.id
+					AND topic_search_runs.status = ?
+			)
+	`, formatTime(now), runStatusRunning); err != nil {
+		return fmt.Errorf("expire stale search topics: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit expire stale running searches: %w", err)

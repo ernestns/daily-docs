@@ -572,6 +572,34 @@ func TestExpireStaleRunningSearchesFailsSearchingTopic(t *testing.T) {
 	}
 }
 
+func TestExpireStaleRunningSearchesFailsSearchingTopicWithoutRunningRun(t *testing.T) {
+	ctx := context.Background()
+	conn := openTopicSearchTestDB(t, ctx)
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "INSERT INTO topics (slug, name, status) VALUES ('go', 'Go', 'searching')"); err != nil {
+		t.Fatalf("seed searching topic: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO topic_search_runs (topic_id, provider, query, status, started_at, completed_at, error)
+		VALUES (1, 'tavily', 'Go docs', 'failed', ?, ?, 'stale running search timed out')
+	`, formatTime(fixedTopicSearchTime().Add(-time.Hour)), formatTime(fixedTopicSearchTime())); err != nil {
+		t.Fatalf("seed failed run: %v", err)
+	}
+
+	if err := ExpireStaleRunningSearches(ctx, conn, fixedTopicSearchTime()); err != nil {
+		t.Fatalf("expire stale running searches: %v", err)
+	}
+
+	var topicStatus string
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'go'").Scan(&topicStatus); err != nil {
+		t.Fatalf("read topic status: %v", err)
+	}
+	if topicStatus != "failed" {
+		t.Fatalf("expected searching topic without a running run to fail, got %q", topicStatus)
+	}
+}
+
 func TestProcessNextQueuedTopicNoopsWithoutQueuedTopic(t *testing.T) {
 	ctx := context.Background()
 	conn := openTopicSearchTestDB(t, ctx)
