@@ -203,6 +203,43 @@ func TestMissingTopicPageShowsQueuedStateWhenProviderFails(t *testing.T) {
 	}
 }
 
+func TestMissingTopicPageProcessesRequestedTopicWhenProviderExists(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	seedQueuedWebTopic(t, ctx, conn, "about", "About")
+
+	handler := newTestHandlerWithProvider(conn, webFakeProvider{
+		results: []topicsearch.SearchResult{
+			{Title: "Generics", URL: "https://doc.rust-lang.org/stable/book/ch10-00-generics.html"},
+		},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/rust", nil))
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); location != "/rust" {
+		t.Fatalf("expected redirect to /rust, got %q", location)
+	}
+
+	var rustStatus, aboutStatus string
+	var pageCount int
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'rust'").Scan(&rustStatus); err != nil {
+		t.Fatalf("read rust status: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'about'").Scan(&aboutStatus); err != nil {
+		t.Fatalf("read about status: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
+		t.Fatalf("count pages: %v", err)
+	}
+	if rustStatus != "active" || aboutStatus != "queued" || pageCount != 1 {
+		t.Fatalf("expected only rust active with page, got rust=%q about=%q pages=%d", rustStatus, aboutStatus, pageCount)
+	}
+}
+
 func TestMissingTopicPageShowsQueuedState(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)

@@ -111,7 +111,7 @@ func main() {
 	}
 }
 
-func (a app) processNextQueuedTopic(ctx context.Context) {
+func (a app) processQueuedTopic(ctx context.Context, slug string) {
 	if a.searchProvider == nil {
 		return
 	}
@@ -119,13 +119,14 @@ func (a app) processNextQueuedTopic(ctx context.Context) {
 		a.searchMu.Lock()
 		defer a.searchMu.Unlock()
 	}
-	result, err := topicsearch.ProcessNextQueuedTopic(ctx, a.db, topicsearch.Options{
+	opts := topicsearch.Options{
 		Provider:    a.searchProvider,
 		Reviewer:    a.searchReviewer,
 		Now:         a.now,
 		MinInterval: time.Nanosecond,
 		DailyLimit:  topicProcessingDailyLimit,
-	})
+	}
+	result, err := topicsearch.ProcessQueuedTopic(ctx, a.db, slug, opts)
 	if err != nil {
 		if result.Processed {
 			log.Printf("topic processor failed topic=%s error=%v", result.Result.TopicSlug, err)

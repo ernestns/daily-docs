@@ -62,8 +62,18 @@ func (a app) handleMissingTopic(w http.ResponseWriter, r *http.Request, topic st
 		return
 	}
 
-	a.processNextQueuedTopic(r.Context())
-	renderTemplate(w, queuedTopicTemplate, queued)
+	a.processQueuedTopic(r.Context(), queued.Slug)
+	updated, err := loadQueuedTopic(r.Context(), a.db, queued.Slug)
+	if err != nil {
+		log.Printf("load queued topic after processing failed: %v", err)
+		renderTemplate(w, queuedTopicTemplate, queued)
+		return
+	}
+	if updated.Status == "active" {
+		http.Redirect(w, r, "/"+updated.Slug, http.StatusSeeOther)
+		return
+	}
+	renderTemplate(w, queuedTopicTemplate, updated)
 }
 
 func (a app) homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +151,7 @@ func (a app) processTopicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.processNextQueuedTopic(r.Context())
+	a.processQueuedTopic(r.Context(), slug)
 	http.Redirect(w, r, "/"+slug, http.StatusSeeOther)
 }
 
@@ -171,7 +181,7 @@ func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		a.processNextQueuedTopic(r.Context())
+		a.processQueuedTopic(r.Context(), queued.Slug)
 		http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
 		return
 	}

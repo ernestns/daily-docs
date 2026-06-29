@@ -394,6 +394,78 @@ func TestProcessNextQueuedTopicProcessesOldestQueuedTopic(t *testing.T) {
 	}
 }
 
+func TestProcessQueuedTopicProcessesSpecificQueuedTopic(t *testing.T) {
+	ctx := context.Background()
+	conn := openTopicSearchTestDB(t, ctx)
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO topics (slug, name, status, created_at) VALUES
+			('about', 'About', 'queued', '2026-06-29 10:00:00'),
+			('rust', 'Rust', 'queued', '2026-06-29 11:00:00')
+	`); err != nil {
+		t.Fatalf("seed queued topics: %v", err)
+	}
+
+	result, err := ProcessQueuedTopic(ctx, conn, "rust", Options{
+		Provider: fakeProvider{
+			results: []SearchResult{{Title: "Rust Generics", URL: "https://doc.rust-lang.org/stable/book/ch10-00-generics.html"}},
+		},
+		Now:         fixedTopicSearchTime,
+		MinInterval: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatalf("process queued topic: %v", err)
+	}
+	if !result.Processed || result.Result.TopicSlug != "rust" {
+		t.Fatalf("expected rust to be processed, got %+v", result)
+	}
+
+	var rustStatus, aboutStatus string
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'rust'").Scan(&rustStatus); err != nil {
+		t.Fatalf("read rust status: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'about'").Scan(&aboutStatus); err != nil {
+		t.Fatalf("read about status: %v", err)
+	}
+	if rustStatus != "active" || aboutStatus != "queued" {
+		t.Fatalf("unexpected statuses rust=%q about=%q", rustStatus, aboutStatus)
+	}
+}
+
+func TestSearchTopicExpiresStaleRunningSearches(t *testing.T) {
+	ctx := context.Background()
+	conn := openTopicSearchTestDB(t, ctx)
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "INSERT INTO topics (slug, name, status) VALUES ('env', 'Env', 'queued')"); err != nil {
+		t.Fatalf("seed env topic: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO topic_search_runs (topic_id, provider, query, status, started_at)
+		VALUES (1, 'tavily', 'Env docs', 'running', ?)
+	`, formatTime(fixedTopicSearchTime().Add(-time.Hour))); err != nil {
+		t.Fatalf("seed stale run: %v", err)
+	}
+
+	_, err := SearchTopic(ctx, conn, "Rust", Options{
+		Provider:    fakeProvider{results: []SearchResult{{Title: "Rust Generics", URL: "https://doc.rust-lang.org/stable/book/ch10-00-generics.html"}}},
+		Now:         fixedTopicSearchTime,
+		MinInterval: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatalf("search topic with stale running run: %v", err)
+	}
+
+	var staleStatus, staleError string
+	if err := conn.QueryRowContext(ctx, "SELECT status, error FROM topic_search_runs WHERE query = 'Env docs'").Scan(&staleStatus, &staleError); err != nil {
+		t.Fatalf("read stale run: %v", err)
+	}
+	if staleStatus != "failed" || staleError != "stale running search timed out" {
+		t.Fatalf("expected stale run to fail, got status=%q error=%q", staleStatus, staleError)
+	}
+}
+
 func TestProcessNextQueuedTopicNoopsWithoutQueuedTopic(t *testing.T) {
 	ctx := context.Background()
 	conn := openTopicSearchTestDB(t, ctx)

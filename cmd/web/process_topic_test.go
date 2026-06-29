@@ -32,10 +32,11 @@ func TestQueuedTopicPageShowsProcessButton(t *testing.T) {
 	}
 }
 
-func TestProcessTopicProcessesOldestQueuedTopic(t *testing.T) {
+func TestProcessTopicProcessesRequestedQueuedTopic(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
 	defer conn.Close()
+	seedQueuedWebTopic(t, ctx, conn, "about", "About")
 	seedQueuedWebTopic(t, ctx, conn, "rust", "Rust")
 
 	handler := newTestHandlerWithProvider(conn, webFakeProvider{
@@ -55,16 +56,19 @@ func TestProcessTopicProcessesOldestQueuedTopic(t *testing.T) {
 		t.Fatalf("expected redirect to /rust, got %q", location)
 	}
 
-	var status string
+	var rustStatus, aboutStatus string
 	var pageCount int
-	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'rust'").Scan(&status); err != nil {
-		t.Fatalf("read topic status: %v", err)
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'rust'").Scan(&rustStatus); err != nil {
+		t.Fatalf("read rust status: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'about'").Scan(&aboutStatus); err != nil {
+		t.Fatalf("read about status: %v", err)
 	}
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
 		t.Fatalf("count pages: %v", err)
 	}
-	if status != "active" || pageCount != 1 {
-		t.Fatalf("expected active topic with page, got status=%q pages=%d", status, pageCount)
+	if rustStatus != "active" || aboutStatus != "queued" || pageCount != 1 {
+		t.Fatalf("expected only rust active with page, got rust=%q about=%q pages=%d", rustStatus, aboutStatus, pageCount)
 	}
 }
 

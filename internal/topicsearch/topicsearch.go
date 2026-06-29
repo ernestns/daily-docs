@@ -16,6 +16,7 @@ const (
 	DefaultMinInterval = 5 * time.Minute
 	DefaultMinScore    = 65
 	DefaultDailyLimit  = 20
+	StaleRunTimeout    = 30 * time.Minute
 )
 
 var (
@@ -132,6 +133,9 @@ func SearchTopic(ctx context.Context, conn *sql.DB, topic string, opts Options) 
 		return Result{}, err
 	}
 
+	if err := failStaleRunningSearches(ctx, conn, now); err != nil {
+		return Result{}, err
+	}
 	if limited, err := searchRateLimited(ctx, conn, now, minInterval); err != nil {
 		return Result{}, err
 	} else if limited {
@@ -260,6 +264,38 @@ func ProcessNextQueuedTopic(ctx context.Context, conn *sql.DB, opts Options) (Qu
 	return QueueResult{Processed: true, Result: result}, err
 }
 
+func ProcessQueuedTopic(ctx context.Context, conn *sql.DB, slug string, opts Options) (QueueResult, error) {
+	now := currentTime(opts.Now)
+	dailyLimit := opts.DailyLimit
+	if dailyLimit < 1 {
+		dailyLimit = DefaultDailyLimit
+	}
+	limited, err := dailyLimitReached(ctx, conn, now, dailyLimit)
+	if err != nil {
+		return QueueResult{}, err
+	}
+	if limited {
+		return QueueResult{DailyLimitReached: true}, nil
+	}
+
+	var topic string
+	err = conn.QueryRowContext(ctx, `
+		SELECT name
+		FROM topics
+		WHERE slug = ?
+			AND status = 'queued'
+	`, slug).Scan(&topic)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QueueResult{}, nil
+	}
+	if err != nil {
+		return QueueResult{}, fmt.Errorf("read queued topic %q: %w", slug, err)
+	}
+
+	result, err := SearchTopic(ctx, conn, topic, opts)
+	return QueueResult{Processed: true, Result: result}, err
+}
+
 func dailyLimitReached(ctx context.Context, conn *sql.DB, now time.Time, limit int) (bool, error) {
 	if limit < 1 {
 		return false, nil
@@ -317,6 +353,21 @@ func searchRateLimited(ctx context.Context, conn *sql.DB, now time.Time, minInte
 		return false, fmt.Errorf("parse latest search time: %w", err)
 	}
 	return now.Sub(started) < minInterval, nil
+}
+
+func failStaleRunningSearches(ctx context.Context, conn *sql.DB, now time.Time) error {
+	cutoff := now.Add(-StaleRunTimeout)
+	if _, err := conn.ExecContext(ctx, `
+		UPDATE topic_search_runs
+		SET status = 'failed',
+			completed_at = ?,
+			error = 'stale running search timed out'
+		WHERE status = 'running'
+			AND started_at < ?
+	`, formatTime(now), formatTime(cutoff)); err != nil {
+		return fmt.Errorf("expire stale running searches: %w", err)
+	}
+	return nil
 }
 
 func ensureTopic(ctx context.Context, conn *sql.DB, slug string, name string) (int64, error) {
