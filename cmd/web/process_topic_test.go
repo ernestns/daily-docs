@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ernestns/daily-docs/internal/topicsearch"
 )
@@ -153,10 +154,104 @@ func TestProcessTopicRetriesFailedTopic(t *testing.T) {
 	}
 }
 
+func TestProcessTopicDatastarRequestReturnsStatusFragment(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	seedQueuedWebTopic(t, ctx, conn, "rust", "Rust")
+
+	handler := newTestHandlerWithProvider(conn, webFakeProvider{
+		results: []topicsearch.SearchResult{
+			{Title: "Generics", URL: "https://doc.rust-lang.org/stable/book/ch10-00-generics.html"},
+		},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/process-topic", strings.NewReader("topic=rust"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Datastar-Request", "true")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{`id="topic-status"`, `View reading`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in Datastar response:\n%s", expected, body)
+		}
+	}
+}
+
+func TestProcessTopicReturnsBeforeAsyncProcessingCompletes(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	seedQueuedWebTopic(t, ctx, conn, "rust", "Rust")
+
+	provider := blockingWebProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	handler := newTestHandlerWithProviderMode(conn, provider, true)
+	request := httptest.NewRequest(http.MethodPost, "/process-topic", strings.NewReader("topic=rust"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(response, request)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected process-topic response before provider finished")
+	}
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", response.Code)
+	}
+
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected async provider to start")
+	}
+	close(provider.release)
+	waitForWebTopicStatus(t, ctx, conn, "rust", "active")
+}
+
 func seedQueuedWebTopic(t *testing.T, ctx context.Context, conn *sql.DB, slug string, name string) {
 	t.Helper()
 
 	seedWebTopic(t, ctx, conn, slug, name, "queued")
+}
+
+func waitForWebTopicStatus(t *testing.T, ctx context.Context, conn *sql.DB, slug string, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var status string
+		if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = ?", slug).Scan(&status); err == nil && status == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for topic %q status %q", slug, want)
+}
+
+type blockingWebProvider struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p blockingWebProvider) Search(context.Context, string, int) ([]topicsearch.SearchResult, error) {
+	close(p.started)
+	<-p.release
+	return []topicsearch.SearchResult{
+		{Title: "Generics", URL: "https://doc.rust-lang.org/stable/book/ch10-00-generics.html"},
+	}, nil
 }
 
 func seedWebTopic(t *testing.T, ctx context.Context, conn *sql.DB, slug string, name string, status string) {

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Name}} - DailyDocs</title>
+  <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.2/bundles/datastar.js"></script>
   <style>
     body {
       margin: 0;
@@ -41,7 +42,9 @@
     form {
       margin: 0 0 1.5rem;
     }
-    button {
+    button,
+    a.button {
+      display: inline-block;
       padding: 0.75rem 1rem;
       border: 0;
       border-radius: 6px;
@@ -49,6 +52,7 @@
       color: #ffffff;
       background: #1f2933;
       cursor: pointer;
+      text-decoration: none;
     }
     a {
       color: #1f2933;
@@ -58,26 +62,8 @@
 <body>
   <main>
     <section>
-      <p class="status">{{.StatusLabel}}</p>
       <h1>{{.Name}}</h1>
-      {{if eq .Status "searching"}}
-      <p>This topic is being processed. Refresh this page in a moment.</p>
-      {{else if eq .Status "failed"}}
-      <p>This topic could not be processed. DailyDocs can process up to 20 requested topics per day.</p>
-      {{else}}
-      <p>This topic is queued. DailyDocs can process up to 20 requested topics per day.</p>
-      {{end}}
-      {{if eq .Status "queued"}}
-      <form method="post" action="/process-topic">
-        <input type="hidden" name="topic" value="{{.Slug}}">
-        <button type="submit">Process topic</button>
-      </form>
-      {{else if eq .Status "failed"}}
-      <form method="post" action="/process-topic">
-        <input type="hidden" name="topic" value="{{.Slug}}">
-        <button type="submit">Process topic</button>
-      </form>
-      {{end}}
+      {{template "topic_status" .}}
       <p><a href="/">Search another topic</a> · <a href="/topics">All topics</a></p>
     </section>
   </main>

@@ -19,11 +19,16 @@ func newTestHandler(conn *sql.DB) http.Handler {
 }
 
 func newTestHandlerWithProvider(conn *sql.DB, provider topicsearch.Provider) http.Handler {
+	return newTestHandlerWithProviderMode(conn, provider, false)
+}
+
+func newTestHandlerWithProviderMode(conn *sql.DB, provider topicsearch.Provider, asyncProcessing bool) http.Handler {
 	app := app{
-		db:             conn,
-		now:            func() time.Time { return time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC) },
-		searchMu:       &sync.Mutex{},
-		searchProvider: provider,
+		db:              conn,
+		now:             func() time.Time { return time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC) },
+		searchMu:        &sync.Mutex{},
+		searchProvider:  provider,
+		asyncProcessing: asyncProcessing,
 	}
 
 	mux := http.NewServeMux()

@@ -1,0 +1,28 @@
+{{define "topic_status"}}
+<div
+  id="topic-status"
+  {{if .IsProcessing}}data-on-interval__duration.2s="@get('/topics/{{.Slug}}/status')"{{end}}
+>
+  <p class="status">{{.StatusLabel}}</p>
+  {{if eq .Status "active"}}
+  <p>This topic is ready.</p>
+  <p><a class="button" href="/{{.Slug}}">View reading</a></p>
+  {{else if .IsProcessing}}
+  <p>This topic is being processed. Results will appear when they are ready.</p>
+  {{else if eq .Status "failed"}}
+  <p>This topic could not be processed. DailyDocs can process up to 20 requested topics per day.</p>
+  {{else}}
+  <p>This topic is queued. DailyDocs can process up to 20 requested topics per day.</p>
+  {{end}}
+  {{if .CanProcess}}
+  <form
+    method="post"
+    action="/process-topic"
+    data-on:submit__prevent="@post('/process-topic', {contentType: 'form'})"
+  >
+    <input type="hidden" name="topic" value="{{.Slug}}">
+    <button type="submit">Process topic</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

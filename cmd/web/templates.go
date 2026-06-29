@@ -13,7 +13,8 @@ var (
 	topicsTemplate           = mustTemplate("templates/topics.html")
 	topicEvaluationsTemplate = mustTemplate("templates/topic_evaluations.html")
 	readingTemplate          = mustTemplate("templates/reading.html")
-	queuedTopicTemplate      = mustTemplate("templates/queued_topic.html")
+	queuedTopicTemplate      = mustTemplate("templates/queued_topic.html", "templates/topic_status.html")
+	topicStatusTemplate      = mustTemplate("templates/topic_status.html")
 )
 
 func mustTemplate(path string, extra ...string) *template.Template {

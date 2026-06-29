@@ -71,17 +71,17 @@ When a user requests a missing topic:
 ```text
 GET /{topic}
   -> create queued topic
-  -> attempt processing when allowed
-  -> show reading or queued state
+  -> start processing when allowed
+  -> show reading or status state
 ```
 
-The UI should make it clear when the request remains queued. A process action is available for queued topics.
+The UI should make it clear when the request remains queued, is processing, has failed, or is ready. A process action is available for queued and failed topics.
 
 Processing flow:
 
 ```text
 request or POST /process-topic
-  -> find oldest queued topic
+  -> start processing the requested queued or failed topic in the background
   -> stop if 20 topics have been processed today
   -> run search pipeline
   -> mark active or failed
@@ -175,7 +175,7 @@ The URL is the reader state.
 
 ## UI Scope
 
-Use server-rendered Go templates with small, targeted JavaScript for interactions such as autocomplete and selecting one topic.
+Use server-rendered Go templates with small, targeted JavaScript for interactions such as autocomplete and selecting one topic. Datastar is used for reactive topic status updates while background processing runs.
 
 Do not turn the app into a complex single-page application.
 

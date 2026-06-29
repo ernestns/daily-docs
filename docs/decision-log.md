@@ -79,8 +79,8 @@ Implications:
 
 - Missing-topic search should offer a topic request.
 - The request is visible as queued.
-- The request path attempts processing immediately when allowed.
-- A public process action handles topics that remain queued.
+- The request path starts processing asynchronously when allowed.
+- A public process action handles topics that remain queued or failed.
 - Evaluated search results are stored, and accepted results become active pages.
 - There is no manual activation gate in the MVP.
 - Existing documentation URL submission, source, candidate, and admin activation paths are retired.
@@ -110,20 +110,20 @@ Implications:
 - Fall back to deterministic ranking when `OPENAI_API_KEY` is not configured.
 - AI summaries, quizzes, tagging, and quality review are future features, not MVP requirements.
 
-### Process Topic Requests With Manual Fallback
+### Process Topic Requests Asynchronously
 
-Decision: the MVP attempts to process a newly requested topic immediately and exposes a public process action for topics that remain queued.
+Decision: the MVP starts processing a newly requested topic asynchronously and exposes a public process action for topics that remain queued or failed.
 
-Reason: immediate processing gives the expected user experience for new requests. The manual action keeps existing queued topics recoverable without adding a background worker. A daily cap directly controls cost and abuse.
+Reason: processing can take several seconds. Returning a status page immediately gives a better user experience while still keeping the implementation in the web process. The manual action keeps recoverable topics visible. A daily cap directly controls cost and abuse.
 
 Implications:
 
-- Missing-topic requests enqueue, then attempt processing.
-- The process action also runs Tavily/OpenAI processing.
+- Missing-topic requests enqueue, then start Tavily/OpenAI processing in the background.
+- The process action also starts background Tavily/OpenAI processing.
 - Process at most 20 topics per UTC day.
 - If the daily cap has been reached, keep remaining topics queued.
-- The UI should show that the request has been enqueued and can be processed.
-- No retry policy exists yet.
+- The UI shows queued/searching/reviewing/storing/failed/active status and updates the status panel with Datastar.
+- Failed topics can be retried manually.
 - Per-user rate limiting can wait until there is evidence the daily cap is insufficient.
 
 ### Deprioritize Scheduled Backups

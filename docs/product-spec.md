@@ -88,7 +88,7 @@ User visits `dailydocs.dev`, searches for a topic, then clicks `View Reading`.
 
 If the topic exists, DailyDocs shows today's reading.
 
-If the topic does not exist, DailyDocs creates an enqueued topic request and immediately attempts processing when allowed by the daily cap. A public action can process topics that remain queued.
+If the topic does not exist, DailyDocs creates an enqueued topic request and starts processing in the background when allowed by the daily cap. A public action can process topics that remain queued or failed.
 
 ```text
 Topic
@@ -163,8 +163,8 @@ When a missing topic is requested:
 
 1. Normalize the topic into a slug.
 2. Create or reuse a topic request record.
-3. Attempt processing immediately when configuration and daily cap allow it.
-4. Show a process action for topics that remain queued.
+3. Start processing in the background when configuration and daily cap allow it.
+4. Show a process action for topics that remain queued or failed.
 5. Store evaluated candidates and accepted pages.
 6. Display the first available reading once accepted pages exist.
 

@@ -22,11 +22,12 @@ var topicPathPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 const topicProcessingDailyLimit = 20
 
 type app struct {
-	db             *sql.DB
-	now            func() time.Time
-	searchMu       *sync.Mutex
-	searchProvider topicsearch.Provider
-	searchReviewer topicsearch.Reviewer
+	db              *sql.DB
+	now             func() time.Time
+	searchMu        *sync.Mutex
+	searchProvider  topicsearch.Provider
+	searchReviewer  topicsearch.Reviewer
+	asyncProcessing bool
 }
 
 func main() {
@@ -63,11 +64,12 @@ func main() {
 	searchReviewer := openAIReviewerFromEnv()
 
 	app := app{
-		db:             conn,
-		now:            func() time.Time { return time.Now().UTC() },
-		searchMu:       &sync.Mutex{},
-		searchProvider: searchProvider,
-		searchReviewer: searchReviewer,
+		db:              conn,
+		now:             func() time.Time { return time.Now().UTC() },
+		searchMu:        &sync.Mutex{},
+		searchProvider:  searchProvider,
+		searchReviewer:  searchReviewer,
+		asyncProcessing: true,
 	}
 
 	mux := http.NewServeMux()
@@ -140,6 +142,22 @@ func (a app) processQueuedTopic(ctx context.Context, slug string) {
 	} else if result.DailyLimitReached {
 		log.Printf("topic processor daily limit reached limit=%d", topicProcessingDailyLimit)
 	}
+}
+
+func (a app) processQueuedTopicAsync(slug string) bool {
+	if a.searchProvider == nil {
+		return false
+	}
+	if !a.asyncProcessing {
+		a.processQueuedTopic(context.Background(), slug)
+		return true
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		a.processQueuedTopic(ctx, slug)
+	}()
+	return true
 }
 
 func openAIReviewerFromEnv() topicsearch.Reviewer {

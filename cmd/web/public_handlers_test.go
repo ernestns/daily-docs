@@ -217,11 +217,11 @@ func TestMissingTopicPageProcessesRequestedTopicWhenProviderExists(t *testing.T)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/rust", nil))
 
-	if response.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303, got %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
 	}
-	if location := response.Header().Get("Location"); location != "/rust" {
-		t.Fatalf("expected redirect to /rust, got %q", location)
+	if !strings.Contains(response.Body.String(), "View reading") {
+		t.Fatalf("expected active status page:\n%s", response.Body.String())
 	}
 
 	var rustStatus, aboutStatus string
@@ -237,6 +237,33 @@ func TestMissingTopicPageProcessesRequestedTopicWhenProviderExists(t *testing.T)
 	}
 	if rustStatus != "active" || aboutStatus != "queued" || pageCount != 1 {
 		t.Fatalf("expected only rust active with page, got rust=%q about=%q pages=%d", rustStatus, aboutStatus, pageCount)
+	}
+}
+
+func TestTopicStatusEndpointRendersStatusFragment(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+	seedWebTopic(t, ctx, conn, "rust", "Rust", "searching")
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO topic_search_runs (topic_id, provider, query, status, stage, started_at)
+		VALUES ((SELECT id FROM topics WHERE slug = 'rust'), 'tavily', 'Rust docs', 'running', 'reviewing', datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed running search: %v", err)
+	}
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/topics/rust/status", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{`id="topic-status"`, `reviewing`, `data-on-interval__duration.2s`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected %q in status fragment:\n%s", expected, body)
+		}
 	}
 }
 

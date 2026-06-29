@@ -63,16 +63,18 @@ func (a app) handleMissingTopic(w http.ResponseWriter, r *http.Request, topic st
 		return
 	}
 
-	a.processQueuedTopic(r.Context(), queued.Slug)
+	started := false
+	if queued.Status == "queued" {
+		started = a.processQueuedTopicAsync(queued.Slug)
+	}
 	updated, err := loadQueuedTopic(r.Context(), a.db, queued.Slug)
 	if err != nil {
-		log.Printf("load queued topic after processing failed: %v", err)
+		log.Printf("load queued topic after starting processor failed: %v", err)
 		renderTemplate(w, queuedTopicTemplate, queued)
 		return
 	}
-	if updated.Status == "active" {
-		http.Redirect(w, r, "/"+updated.Slug, http.StatusSeeOther)
-		return
+	if started && updated.Status == "queued" {
+		updated = processingTopicView(updated)
 	}
 	renderTemplate(w, queuedTopicTemplate, updated)
 }
@@ -116,6 +118,11 @@ func (a app) topicEvaluationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if slug, ok := parseTopicStatusPath(r.URL.Path); ok {
+		a.topicStatusHandler(w, r, slug)
+		return
+	}
+
 	slug, ok := parseTopicEvaluationsPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -152,7 +159,11 @@ func (a app) processTopicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.processQueuedTopic(r.Context(), slug)
+	started := a.processQueuedTopicAsync(slug)
+	if isDatastarRequest(r) {
+		a.renderTopicStatus(w, r, slug, started)
+		return
+	}
 	http.Redirect(w, r, "/"+slug, http.StatusSeeOther)
 }
 
@@ -182,12 +193,35 @@ func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		a.processQueuedTopic(r.Context(), queued.Slug)
+		if queued.Status == "queued" {
+			a.processQueuedTopicAsync(queued.Slug)
+		}
 		http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
 		return
 	}
 
 	http.Redirect(w, r, "/"+match.Slug, http.StatusSeeOther)
+}
+
+func (a app) topicStatusHandler(w http.ResponseWriter, r *http.Request, slug string) {
+	a.renderTopicStatus(w, r, slug, false)
+}
+
+func (a app) renderTopicStatus(w http.ResponseWriter, r *http.Request, slug string, started bool) {
+	queued, err := loadQueuedTopic(r.Context(), a.db, slug)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		log.Printf("load topic status failed: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if started && (queued.Status == "queued" || queued.Status == "failed") {
+		queued = processingTopicView(queued)
+	}
+	renderTemplateByName(w, topicStatusTemplate, "topic_status", queued)
 }
 
 func (a app) searchTopicsHandler(w http.ResponseWriter, r *http.Request) {
@@ -256,10 +290,12 @@ type evaluationResult struct {
 }
 
 type queuedTopicView struct {
-	Slug        string
-	Name        string
-	Status      string
-	StatusLabel string
+	Slug         string
+	Name         string
+	Status       string
+	StatusLabel  string
+	CanProcess   bool
+	IsProcessing bool
 }
 
 func listTopics(ctx context.Context, conn *sql.DB, query string, limit int) ([]topicOption, error) {
@@ -462,6 +498,20 @@ func parseTopicEvaluationsPath(path string) (string, bool) {
 	return slug, true
 }
 
+func parseTopicStatusPath(path string) (string, bool) {
+	prefix := "/topics/"
+	suffix := "/status"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	slug := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	slug = strings.Trim(slug, "/")
+	if !topicPathPattern.MatchString(slug) {
+		return "", false
+	}
+	return slug, true
+}
+
 func loadQueuedTopic(ctx context.Context, conn *sql.DB, slug string) (queuedTopicView, error) {
 	if err := topicsearch.ExpireStaleRunningSearches(ctx, conn, time.Now().UTC()); err != nil {
 		return queuedTopicView{}, err
@@ -496,6 +546,8 @@ func loadQueuedTopic(ctx context.Context, conn *sql.DB, slug string) (queuedTopi
 		return queuedTopicView{}, fmt.Errorf("load queued topic: %w", err)
 	}
 	queued.StatusLabel = topicStatusLabel(queued.Status, runStatus, runStage)
+	queued.CanProcess = queued.Status == "queued" || queued.Status == "failed"
+	queued.IsProcessing = queued.Status == "searching"
 	return queued, nil
 }
 
@@ -504,6 +556,14 @@ func topicStatusLabel(topicStatus string, runStatus string, runStage string) str
 		return runStage
 	}
 	return topicStatus
+}
+
+func processingTopicView(queued queuedTopicView) queuedTopicView {
+	queued.Status = "searching"
+	queued.StatusLabel = "searching"
+	queued.CanProcess = false
+	queued.IsProcessing = true
+	return queued
 }
 
 func findTopic(ctx context.Context, conn *sql.DB, value string) (topicOption, bool, error) {
@@ -535,6 +595,17 @@ func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any) {
 	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("render template failed: %v", err)
 	}
+}
+
+func renderTemplateByName(w http.ResponseWriter, tmpl *template.Template, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+		log.Printf("render template %q failed: %v", name, err)
+	}
+}
+
+func isDatastarRequest(r *http.Request) bool {
+	return r.Header.Get("Datastar-Request") != ""
 }
 
 func slugFromTopicName(value string) string {
