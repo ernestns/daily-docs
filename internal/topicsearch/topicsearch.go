@@ -15,6 +15,7 @@ const (
 	DefaultMaxResults  = 10
 	DefaultMinInterval = 5 * time.Minute
 	DefaultMinScore    = 65
+	DefaultDailyLimit  = 20
 )
 
 var (
@@ -69,6 +70,7 @@ type Options struct {
 	MaxResults  int
 	MinInterval time.Duration
 	MinScore    int
+	DailyLimit  int
 }
 
 type Result struct {
@@ -80,6 +82,12 @@ type Result struct {
 	ResultCount int
 	StoredCount int
 	RateLimited bool
+}
+
+type QueueResult struct {
+	Processed         bool
+	DailyLimitReached bool
+	Result            Result
 }
 
 type storedResult struct {
@@ -217,6 +225,56 @@ func SearchTopic(ctx context.Context, conn *sql.DB, topic string, opts Options) 
 		ResultCount: len(providerResults),
 		StoredCount: storedCount,
 	}, nil
+}
+
+func ProcessNextQueuedTopic(ctx context.Context, conn *sql.DB, opts Options) (QueueResult, error) {
+	now := currentTime(opts.Now)
+	dailyLimit := opts.DailyLimit
+	if dailyLimit < 1 {
+		dailyLimit = DefaultDailyLimit
+	}
+	limited, err := dailyLimitReached(ctx, conn, now, dailyLimit)
+	if err != nil {
+		return QueueResult{}, err
+	}
+	if limited {
+		return QueueResult{DailyLimitReached: true}, nil
+	}
+
+	var topic string
+	err = conn.QueryRowContext(ctx, `
+		SELECT name
+		FROM topics
+		WHERE status = 'queued'
+		ORDER BY created_at ASC, id ASC
+		LIMIT 1
+	`).Scan(&topic)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QueueResult{}, nil
+	}
+	if err != nil {
+		return QueueResult{}, fmt.Errorf("read next queued topic: %w", err)
+	}
+
+	result, err := SearchTopic(ctx, conn, topic, opts)
+	return QueueResult{Processed: true, Result: result}, err
+}
+
+func dailyLimitReached(ctx context.Context, conn *sql.DB, now time.Time, limit int) (bool, error) {
+	if limit < 1 {
+		return false, nil
+	}
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var count int
+	if err := conn.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM topic_search_runs
+		WHERE status IN ('running', 'completed', 'failed')
+			AND started_at >= ?
+	`, formatTime(dayStart)).Scan(&count); err != nil {
+		return false, fmt.Errorf("count daily topic searches: %w", err)
+	}
+	return count >= limit, nil
 }
 
 func buildQuery(topic string) string {

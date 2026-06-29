@@ -79,8 +79,8 @@ Implications:
 
 - Missing-topic search should offer a topic request.
 - The request is visible as queued.
-- The system starts a bounded search immediately when allowed by the global rate limit.
-- Search results are stored directly as active pages for the MVP.
+- A background worker processes queued topics.
+- Evaluated search results are stored, and accepted results become active pages.
 - There is no manual activation gate in the MVP.
 - Existing documentation URL submission, source, candidate, and admin activation paths are retired.
 
@@ -88,6 +88,7 @@ Initial pipeline:
 
 ```text
 Topic
+  -> Queue
   -> Search
   -> Store
   -> Display
@@ -108,18 +109,21 @@ Implications:
 - Fall back to deterministic ranking when `OPENAI_API_KEY` is not configured.
 - AI summaries, quizzes, tagging, and quality review are future features, not MVP requirements.
 
-### Keep Topic Search Globally Bounded
+### Process Queued Topics In The App
 
-Decision: the MVP runs at most one topic search at a time globally, and no more than one every five minutes.
+Decision: the MVP runs a small in-process worker that processes queued topics up to a daily cap.
 
-Reason: inline search keeps the product simple, but provider calls need a basic cost and abuse guard before being exposed publicly.
+Reason: queued topics should not depend on a future page visit to be processed. A daily cap directly controls cost and abuse. Keeping the worker inside the existing Go app preserves the simple single-binary deployment model.
 
 Implications:
 
-- If a topic is requested while the limit is active, keep it queued.
+- Missing-topic requests only enqueue.
+- The worker owns Tavily/OpenAI processing.
+- Process at most 20 queued topics per UTC day.
+- If the daily cap has been reached, keep remaining topics queued.
 - The UI should show that the request has been enqueued.
-- A later request or command can process queued topics.
-- Per-user rate limiting can wait until there is evidence the global limit is insufficient.
+- No retry policy exists yet.
+- Per-user rate limiting can wait until there is evidence the daily cap is insufficient.
 
 ### Deprioritize Scheduled Backups
 

@@ -72,12 +72,19 @@ When a user requests a missing topic:
 GET /{topic}
   -> create queued topic
   -> show queued state
-  -> if global throttle allows, search immediately
-  -> store results as pages
-  -> render reading page if pages now exist
 ```
 
-The UI should make it clear that the request is enqueued even when search begins inline.
+The UI should make it clear that the request is enqueued. Topic processing happens in the background worker.
+
+Worker flow:
+
+```text
+poll regularly
+  -> find oldest queued topic
+  -> stop if 20 topics have been processed today
+  -> run search pipeline
+  -> mark active or failed
+```
 
 ## Search Pipeline
 
@@ -108,14 +115,14 @@ Every reviewed candidate is stored in `topic_search_results`. Only accepted cand
 
 ## Search Limits
 
-Initial limits:
+Initial worker limits:
 
 - one topic search at a time globally
-- at most one topic search every five minutes
+- process at most 20 queued topics per UTC day
 - bounded provider timeout
 - bounded provider result count
 
-If the limit is active, the missing topic remains queued and can be searched by a later request or command.
+If the worker is disabled because `TAVILY_API_KEY` is missing, topics remain queued.
 
 ## Data Model
 
@@ -203,4 +210,4 @@ Operational scripts:
 - Scheduled offsite backups
 - Search provider fallback
 - Better result quality review
-- Abuse controls beyond the initial global rate limit
+- Abuse controls beyond the initial daily processing cap

@@ -126,7 +126,7 @@ func TestGenerateReadingQueuesMissingTopic(t *testing.T) {
 	}
 }
 
-func TestGenerateReadingSearchesMissingTopicWhenProviderExists(t *testing.T) {
+func TestGenerateReadingQueuesMissingTopicWhenProviderExists(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
 	defer conn.Close()
@@ -154,12 +154,12 @@ func TestGenerateReadingSearchesMissingTopicWhenProviderExists(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
 		t.Fatalf("count pages: %v", err)
 	}
-	if topicStatus != "active" || pageCount != 1 {
-		t.Fatalf("expected active topic with one page, got status=%q pages=%d", topicStatus, pageCount)
+	if topicStatus != "queued" || pageCount != 0 {
+		t.Fatalf("expected queued topic without inline pages, got status=%q pages=%d", topicStatus, pageCount)
 	}
 }
 
-func TestMissingTopicPageShowsFailedSearch(t *testing.T) {
+func TestMissingTopicPageShowsQueuedStateWhenProviderFails(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
 	defer conn.Close()
@@ -172,8 +172,8 @@ func TestMissingTopicPageShowsFailedSearch(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "failed") {
-		t.Fatalf("expected failed state in body:\n%s", body)
+	if !strings.Contains(body, "queued") {
+		t.Fatalf("expected queued state in body:\n%s", body)
 	}
 }
 

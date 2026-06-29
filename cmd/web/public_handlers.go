@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/ernestns/daily-docs/internal/reading"
-	"github.com/ernestns/daily-docs/internal/topicsearch"
 )
 
 func (a app) routeHandler(w http.ResponseWriter, r *http.Request) {
@@ -63,46 +62,7 @@ func (a app) handleMissingTopic(w http.ResponseWriter, r *http.Request, topic st
 		return
 	}
 
-	searched, err := a.searchQueuedTopic(r.Context(), queued.Name)
-	if err != nil {
-		if errors.Is(err, topicsearch.ErrRateLimited) {
-			renderTemplate(w, queuedTopicTemplate, queued)
-			return
-		}
-		log.Printf("topic search failed topic=%s error=%v", queued.Slug, err)
-		failed, loadErr := loadQueuedTopic(r.Context(), a.db, queued.Slug)
-		if loadErr != nil {
-			log.Printf("load failed topic failed: %v", loadErr)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		renderTemplate(w, queuedTopicTemplate, failed)
-		return
-	}
-	if searched {
-		http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
-		return
-	}
 	renderTemplate(w, queuedTopicTemplate, queued)
-}
-
-func (a app) searchQueuedTopic(ctx context.Context, topic string) (bool, error) {
-	if a.searchProvider == nil {
-		return false, nil
-	}
-	if a.searchMu != nil {
-		a.searchMu.Lock()
-		defer a.searchMu.Unlock()
-	}
-	_, err := topicsearch.SearchTopic(ctx, a.db, topic, topicsearch.Options{
-		Provider: a.searchProvider,
-		Reviewer: a.searchReviewer,
-		Now:      a.now,
-	})
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func (a app) homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -191,14 +151,6 @@ func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
 		if queueErr != nil {
 			log.Printf("queue topic failed: %v", queueErr)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		searched, searchErr := a.searchQueuedTopic(r.Context(), queued.Name)
-		if searchErr != nil && !errors.Is(searchErr, topicsearch.ErrRateLimited) {
-			log.Printf("topic search failed topic=%s error=%v", queued.Slug, searchErr)
-		}
-		if searched {
-			http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
 			return
 		}
 		http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
