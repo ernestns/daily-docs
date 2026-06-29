@@ -1,5 +1,20 @@
 # DailyDocs Decision Log
 
+## Current Direction
+
+DailyDocs uses topic requests, not documentation URL submissions.
+
+The MVP topic pipeline is:
+
+```text
+Topic
+  -> Tavily Search
+  -> Store
+  -> Display
+```
+
+There is no GPT review step and no manual activation gate in the MVP.
+
 ## Accepted Decisions
 
 ### Store Daily Reading Assignments

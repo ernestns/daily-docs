@@ -1,6 +1,6 @@
 # Deployment Notes
 
-These notes describe the step-zero deployment target: a publicly viewable hello-world Go application behind Caddy.
+These notes describe the single-VPS deployment target: one Go binary, SQLite, systemd, and Caddy.
 
 ## Fresh VPS Bootstrap
 
@@ -11,7 +11,7 @@ apt update
 apt install -y git
 git clone https://github.com/ernestns/daily-docs.git
 cd daily-docs
-DEPLOY_SSH_PUBLIC_KEY='ssh-ed25519 ...' ./bootstrap.sh
+DEPLOY_SSH_PUBLIC_KEY='ssh-ed25519 ...' ./scripts/bootstrap-ubuntu.sh
 ```
 
 Run the bootstrap script as `root`. The application service itself runs as the `dailydocs` system user.
@@ -21,11 +21,11 @@ If you saved the key in a shell variable first, export it before running bootstr
 
 ```sh
 export DEPLOY_SSH_PUBLIC_KEY
-./bootstrap.sh
+./scripts/bootstrap-ubuntu.sh
 ```
 
 A value can appear in `echo "$DEPLOY_SSH_PUBLIC_KEY"` without being visible to
-`./bootstrap.sh` unless it is exported or passed inline as shown above.
+`./scripts/bootstrap-ubuntu.sh` unless it is exported or passed inline as shown above.
 
 The script defaults to:
 
@@ -46,7 +46,7 @@ On Ubuntu 26, `golang-go` installs Go 1.26.
 Override defaults with environment variables:
 
 ```sh
-DOMAIN=example.com APP_ADDR=127.0.0.1:8081 ./bootstrap.sh
+DOMAIN=example.com APP_ADDR=127.0.0.1:8081 ./scripts/bootstrap-ubuntu.sh
 ```
 
 `DEPLOY_SSH_PUBLIC_KEY` should be the public key from your local machine, for example the

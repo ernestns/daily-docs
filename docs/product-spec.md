@@ -350,7 +350,7 @@ A brand-new VPS should be recoverable by:
 ```text
 Install Git
   -> Clone repository
-  -> Run bootstrap.sh
+  -> Run scripts/bootstrap-ubuntu.sh
   -> Restore SQLite backup
   -> Application online
 ```

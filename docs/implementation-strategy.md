@@ -1,10 +1,8 @@
 # DailyDocs Implementation Strategy
 
-## Approach
+## Current Approach
 
-Implement DailyDocs in thin vertical slices.
-
-The core product risk is not rendering a reading page. The core risk is whether a requested topic can quickly produce useful documentation links.
+Build DailyDocs as a small Go monolith with SQLite.
 
 The current MVP pipeline is:
 
@@ -15,55 +13,31 @@ Topic
   -> Display
 ```
 
-No manual activation gate is required for the MVP.
+The main product risk is whether a requested topic can quickly produce useful documentation links. The reader flow, daily assignment logic, migrations, seed importer, validator, and deployment path already exist.
 
-## Completed
+## Current Structure
 
-0. Public hello-world Go app
-1. SQLite schema and migrations
-2. Topic/page seed importer
-3. Daily reading assignment logic with tests
-4. Basic reading page rendering
-5. Topic search and reading URL generation UI
-6. Link validator
-7. Backup and restore scripts
-8. Documentation URL submission queue
-9. Candidate discovery pipeline
-10. Manual activation
-11. Queue runner
-12. Pipeline inspection commands
-13. Topic index page
-14. Missing-topic submission fallback
-15. Topic lookup combobox
-16. Protected admin UI
-17. Topic sources and source lifecycle statuses
-18. Source discovery preview and discovery history
-19. Candidate filters and pipeline telemetry in admin
-20. Admin source action guardrails
-21. Duplicate-submit protection
+```text
+cmd/web                 web server and command entrypoint
+cmd/web/templates       server-rendered HTML
+internal/db             SQLite connection and migrations
+internal/reading        deterministic daily reading assignment
+internal/seed           seed-file importer
+internal/validator      active-link validation
+scripts                 build, deploy, bootstrap, backup, restore
+```
 
-These completed items reflect the first pipeline direction. The architecture has since been simplified. Existing code can be removed or retired as the new topic-search flow replaces it.
+Avoid adding broad layers until there is a concrete need. New behavior should live behind focused packages.
 
-## Next
+## Next Work
 
-22. Add topic request records and statuses.
-23. Add Tavily search provider integration.
-24. Store search runs and search results.
-25. Convert stored search results into active pages.
-26. Trigger topic search inline when a missing topic is requested.
-27. Show queued/searching/failed topic states in the reader UI.
-28. Add global search throttling: one search at a time, at most once every five minutes.
-29. Remove retired documentation URL submission, source, candidate, GPT review, and admin activation paths.
-
-## Backlog
-
-- User feedback on active readings
-- Deactivate active pages
-- Edit active topic and page metadata
-- Scheduled offsite backups
-- Search provider fallback
-- Better result quality review
-- Abuse controls beyond the initial global rate limit
+1. Add `internal/topicsearch`.
+2. Add Tavily search provider integration.
+3. Store search runs and search results.
+4. Convert stored search results into active pages.
+5. Trigger topic search inline when a missing topic is requested.
+6. Add global search throttling: one search at a time, at most once every five minutes.
+7. Add `dailydocs search-topic <topic>` for local testing and production repair.
 
 ## Core Domain
 
@@ -141,43 +115,35 @@ Initial limits:
 
 If the limit is active, the missing topic remains queued and can be searched by a later request or command.
 
-## Data Model Changes
+## Data Model
 
-Add or adapt tables for:
+Current tables:
 
 - `topics`
 - `pages`
 - `daily_readings`
+- `imports`
 - `topic_search_runs`
 - `topic_search_results`
 
-Suggested `topics.status` values:
+`topics.status` values:
 
 - `active`
 - `queued`
 - `searching`
 - `failed`
+- `disabled`
 
-Suggested `topic_search_runs.status` values:
+`topic_search_runs.status` values:
 
 - `running`
 - `completed`
 - `failed`
 - `rate_limited`
 
-`pages` should keep enough provenance to know whether a page came from search:
-
-- source
-- discovered_at
-- search_run_id or equivalent provenance field
-
 Historical `daily_readings` rows must not be deleted.
 
-## Web Application
-
-Build a small Go monolith.
-
-Routes:
+## Web Routes
 
 ```text
 GET /                         topic picker
@@ -187,57 +153,28 @@ GET /topics/search?q=go       autocomplete endpoint
 GET /topics                   topic index
 ```
 
-The topic-only route is the common product URL:
-
-```text
-/sqlite
-```
-
-The topic/date route is the stable archive URL:
-
-```text
-/sqlite/2026-06-26
-```
-
 The URL is the reader state.
 
 ## UI Scope
 
-Use server-rendered Go templates with small, targeted JavaScript for interactions such as autocomplete, selecting one topic, and submit locking.
+Use server-rendered Go templates with small, targeted JavaScript for interactions such as autocomplete and selecting one topic.
 
 Do not turn the app into a complex single-page application.
 
-## Link Validator
-
-Command:
-
-```sh
-dailydocs validate-links
-```
-
-Responsibilities:
-
-- check active pages
-- follow redirects
-- mark repeated failures
-- update `last_verified`
-- optionally propose URL updates
-
-Broken links should be detected before broad traffic depends on a topic.
-
 ## Operational Commands
 
-Keep operational commands small and explicit.
-
-Useful commands:
+Current commands:
 
 ```sh
 dailydocs import-file topics/sqlite.yaml
 dailydocs validate-links
-dailydocs search-topic rust
 ```
 
-The web app can call the same topic-search application code inline. The command exists for local testing and production repair, not as the primary user path.
+Expected next command:
+
+```sh
+dailydocs search-topic rust
+```
 
 ## Deployment
 
@@ -251,13 +188,17 @@ Application startup:
 
 Operational scripts:
 
-- `bootstrap.sh`
-- `backup-sqlite.sh`
-- `restore-sqlite.sh`
-- `deploy-remote.sh`
+- `scripts/bootstrap-ubuntu.sh`
+- `scripts/backup-sqlite.sh`
+- `scripts/restore-sqlite.sh`
+- `scripts/deploy-remote.sh`
 
-## MVP Content Bar
+## Backlog
 
-Each supported topic should aim for roughly 10 to 50 useful documentation links.
-
-The first automated version may store fewer than 10 results if the provider returns too few usable links, but the UI should make the topic state visible rather than hiding the failure.
+- User feedback on active readings
+- Deactivate active pages
+- Edit active topic and page metadata
+- Scheduled offsite backups
+- Search provider fallback
+- Better result quality review
+- Abuse controls beyond the initial global rate limit

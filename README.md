@@ -23,3 +23,11 @@ No accounts. No setup. The URL is the reading.
 - [Product specification](docs/product-spec.md)
 - [Implementation strategy](docs/implementation-strategy.md)
 - [Decision log](docs/decision-log.md)
+
+## Deployment
+
+Fresh Ubuntu VPS setup starts from:
+
+```sh
+scripts/bootstrap-ubuntu.sh
+```
