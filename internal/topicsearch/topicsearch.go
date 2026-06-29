@@ -78,7 +78,7 @@ func SearchTopic(ctx context.Context, conn *sql.DB, topic string, opts Options) 
 		minInterval = DefaultMinInterval
 	}
 
-	topicID, err := upsertTopicStatus(ctx, conn, slug, name, "queued")
+	topicID, err := ensureTopic(ctx, conn, slug, name)
 	if err != nil {
 		return Result{}, err
 	}
@@ -189,6 +189,28 @@ func searchRateLimited(ctx context.Context, conn *sql.DB, now time.Time, minInte
 		return false, fmt.Errorf("parse latest search time: %w", err)
 	}
 	return now.Sub(started) < minInterval, nil
+}
+
+func ensureTopic(ctx context.Context, conn *sql.DB, slug string, name string) (int64, error) {
+	_, err := conn.ExecContext(ctx, `
+		INSERT INTO topics (slug, name, status, updated_at)
+		VALUES (?, ?, 'queued', datetime('now'))
+		ON CONFLICT(slug) DO UPDATE SET
+			name = CASE
+				WHEN topics.name = topics.slug THEN excluded.name
+				ELSE topics.name
+			END,
+			updated_at = datetime('now')
+	`, slug, name)
+	if err != nil {
+		return 0, fmt.Errorf("ensure search topic: %w", err)
+	}
+
+	var topicID int64
+	if err := conn.QueryRowContext(ctx, "SELECT id FROM topics WHERE slug = ?", slug).Scan(&topicID); err != nil {
+		return 0, fmt.Errorf("read search topic id: %w", err)
+	}
+	return topicID, nil
 }
 
 func upsertTopicStatus(ctx context.Context, conn *sql.DB, slug string, name string, status string) (int64, error) {

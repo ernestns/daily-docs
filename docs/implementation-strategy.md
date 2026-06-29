@@ -13,7 +13,7 @@ Topic
   -> Display
 ```
 
-The main product risk is whether a requested topic can quickly produce useful documentation links. The reader flow, daily assignment logic, migrations, seed importer, validator, and deployment path already exist.
+The main product risk is whether a requested topic can quickly produce useful documentation links. The reader flow, daily assignment logic, migrations, seed importer, validator, topic search package, and deployment path already exist.
 
 ## Current Structure
 
@@ -23,6 +23,7 @@ cmd/web/templates       server-rendered HTML
 internal/db             SQLite connection and migrations
 internal/reading        deterministic daily reading assignment
 internal/seed           seed-file importer
+internal/topicsearch    Tavily search and result persistence
 internal/validator      active-link validation
 scripts                 build, deploy, bootstrap, backup, restore
 ```
@@ -31,13 +32,10 @@ Avoid adding broad layers until there is a concrete need. New behavior should li
 
 ## Next Work
 
-1. Add `internal/topicsearch`.
-2. Add Tavily search provider integration.
-3. Store search runs and search results.
-4. Convert stored search results into active pages.
-5. Trigger topic search inline when a missing topic is requested.
-6. Add global search throttling: one search at a time, at most once every five minutes.
-7. Add `dailydocs search-topic <topic>` for local testing and production repair.
+1. Test Tavily searches with real topics locally.
+2. Deploy topic search to production.
+3. Observe real search results and adjust query wording if needed.
+4. Decide whether search-only quality is sufficient before adding feedback or review.
 
 ## Core Domain
 

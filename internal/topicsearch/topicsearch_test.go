@@ -184,6 +184,39 @@ func TestSearchTopicRateLimitsGlobally(t *testing.T) {
 	}
 }
 
+func TestSearchTopicRateLimitPreservesExistingActiveTopic(t *testing.T) {
+	ctx := context.Background()
+	conn := openTopicSearchTestDB(t, ctx)
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "INSERT INTO topics (slug, name, status) VALUES ('go', 'Go', 'active')"); err != nil {
+		t.Fatalf("seed active topic: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO topic_search_runs (topic_id, provider, query, status, started_at)
+		VALUES (1, 'tavily', 'Rust docs', 'completed', ?)
+	`, formatTime(fixedTopicSearchTime())); err != nil {
+		t.Fatalf("seed previous run: %v", err)
+	}
+
+	_, err := SearchTopic(ctx, conn, "Go", Options{
+		Provider:    fakeProvider{results: []SearchResult{{Title: "Go Docs", URL: "https://go.dev/doc/"}}},
+		Now:         func() time.Time { return fixedTopicSearchTime().Add(time.Minute) },
+		MinInterval: 5 * time.Minute,
+	})
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected rate limit, got %v", err)
+	}
+
+	var topicStatus string
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'go'").Scan(&topicStatus); err != nil {
+		t.Fatalf("read topic status: %v", err)
+	}
+	if topicStatus != "active" {
+		t.Fatalf("expected active topic to stay active, got %q", topicStatus)
+	}
+}
+
 func openTopicSearchTestDB(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 
