@@ -89,6 +89,36 @@ func TestSearchTopicDeduplicatesResults(t *testing.T) {
 	}
 }
 
+func TestSearchTopicFiltersLowValueResults(t *testing.T) {
+	ctx := context.Background()
+	conn := openTopicSearchTestDB(t, ctx)
+	defer conn.Close()
+
+	_, err := SearchTopic(ctx, conn, "Rust", Options{
+		Provider: fakeProvider{
+			results: []SearchResult{
+				{Title: "Video", URL: "https://www.youtube.com/watch?v=rust"},
+				{Title: "Forum", URL: "https://www.reddit.com/r/rust/comments/example"},
+				{Title: "PDF", URL: "https://example.com/rust.pdf"},
+				{Title: "Rust Docs", URL: "https://doc.rust-lang.org/book/"},
+			},
+		},
+		Now:         fixedTopicSearchTime,
+		MinInterval: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatalf("search topic: %v", err)
+	}
+
+	var pageCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
+		t.Fatalf("count pages: %v", err)
+	}
+	if pageCount != 1 {
+		t.Fatalf("expected only one unblocked page, got %d", pageCount)
+	}
+}
+
 func TestSearchTopicAppendsReadingOrderForExistingTopic(t *testing.T) {
 	ctx := context.Background()
 	conn := openTopicSearchTestDB(t, ctx)

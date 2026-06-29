@@ -40,6 +40,9 @@ func TestTavilyClientSendsSearchRequest(t *testing.T) {
 	if request.Query != "Rust official documentation" || request.MaxResults != 7 {
 		t.Fatalf("unexpected request: %+v", request)
 	}
+	if len(request.ExcludeDomains) == 0 {
+		t.Fatalf("expected excluded domains in request")
+	}
 	if len(results) != 1 || results[0].Title != "Rust Book" {
 		t.Fatalf("unexpected results: %+v", results)
 	}

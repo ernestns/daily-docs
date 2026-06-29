@@ -150,7 +150,7 @@ func SearchTopic(ctx context.Context, conn *sql.DB, topic string, opts Options) 
 }
 
 func buildQuery(topic string) string {
-	return fmt.Sprintf("%s official documentation guides concepts tutorials reference", topic)
+	return fmt.Sprintf("%s official documentation", topic)
 }
 
 func currentTime(now func() time.Time) time.Time {
@@ -414,6 +414,9 @@ func normalizeResults(results []SearchResult, maxResults int) []storedResult {
 		if err != nil {
 			continue
 		}
+		if isBlockedResult(source, normalizedURL) {
+			continue
+		}
 		if _, exists := seen[normalizedURL]; exists {
 			continue
 		}
@@ -448,6 +451,27 @@ func normalizeURL(raw string) (string, string, error) {
 		parsed.Path = strings.TrimRight(parsed.Path, "/")
 	}
 	return parsed.String(), parsed.Host, nil
+}
+
+func isBlockedResult(host string, normalizedURL string) bool {
+	blockedHosts := map[string]struct{}{
+		"github.com":        {},
+		"reddit.com":        {},
+		"stackoverflow.com": {},
+		"w3schools.com":     {},
+		"youtube.com":       {},
+	}
+	trimmedHost := strings.TrimPrefix(strings.ToLower(host), "www.")
+	if _, blocked := blockedHosts[trimmedHost]; blocked {
+		return true
+	}
+
+	parsed, err := url.Parse(normalizedURL)
+	if err != nil {
+		return true
+	}
+	path := strings.ToLower(parsed.Path)
+	return strings.HasSuffix(path, ".pdf")
 }
 
 func formatTime(t time.Time) string {

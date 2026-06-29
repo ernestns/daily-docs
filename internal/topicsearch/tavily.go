@@ -45,6 +45,7 @@ func (c TavilyClient) Search(ctx context.Context, query string, maxResults int) 
 		IncludeImages:     false,
 		IncludeFavicon:    false,
 		IncludeUsage:      true,
+		ExcludeDomains:    defaultExcludedDomains(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode tavily request: %w", err)
@@ -82,15 +83,16 @@ func (c TavilyClient) Search(ctx context.Context, query string, maxResults int) 
 }
 
 type tavilySearchRequest struct {
-	Query             string `json:"query"`
-	SearchDepth       string `json:"search_depth"`
-	Topic             string `json:"topic"`
-	MaxResults        int    `json:"max_results"`
-	IncludeAnswer     bool   `json:"include_answer"`
-	IncludeRawContent bool   `json:"include_raw_content"`
-	IncludeImages     bool   `json:"include_images"`
-	IncludeFavicon    bool   `json:"include_favicon"`
-	IncludeUsage      bool   `json:"include_usage"`
+	Query             string   `json:"query"`
+	SearchDepth       string   `json:"search_depth"`
+	Topic             string   `json:"topic"`
+	MaxResults        int      `json:"max_results"`
+	IncludeAnswer     bool     `json:"include_answer"`
+	IncludeRawContent bool     `json:"include_raw_content"`
+	IncludeImages     bool     `json:"include_images"`
+	IncludeFavicon    bool     `json:"include_favicon"`
+	IncludeUsage      bool     `json:"include_usage"`
+	ExcludeDomains    []string `json:"exclude_domains,omitempty"`
 }
 
 type tavilySearchResponse struct {
@@ -103,4 +105,14 @@ type tavilySearchResult struct {
 	URL     string  `json:"url"`
 	Content string  `json:"content"`
 	Score   float64 `json:"score"`
+}
+
+func defaultExcludedDomains() []string {
+	return []string{
+		"github.com",
+		"reddit.com",
+		"stackoverflow.com",
+		"w3schools.com",
+		"youtube.com",
+	}
 }
