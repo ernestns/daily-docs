@@ -76,12 +76,7 @@ func (c TavilyClient) Search(ctx context.Context, query string, maxResults int) 
 
 	results := make([]SearchResult, 0, len(searchResp.Results))
 	for _, result := range searchResp.Results {
-		results = append(results, SearchResult{
-			Title:   result.Title,
-			URL:     result.URL,
-			Content: result.Content,
-			Score:   result.Score,
-		})
+		results = append(results, SearchResult(result))
 	}
 	return results, nil
 }
