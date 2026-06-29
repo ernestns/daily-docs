@@ -126,7 +126,33 @@ func TestGenerateReadingQueuesMissingTopic(t *testing.T) {
 	}
 }
 
-func TestGenerateReadingQueuesMissingTopicWhenProviderExists(t *testing.T) {
+func TestGenerateReadingKeepsTopicQueuedWithoutProvider(t *testing.T) {
+	ctx := context.Background()
+	conn := openWebTestDB(t, ctx)
+	defer conn.Close()
+
+	handler := newTestHandler(conn)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/read?topic=Rust", nil))
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", response.Code)
+	}
+
+	var topicStatus string
+	var pageCount int
+	if err := conn.QueryRowContext(ctx, "SELECT status FROM topics WHERE slug = 'rust'").Scan(&topicStatus); err != nil {
+		t.Fatalf("read topic status: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
+		t.Fatalf("count pages: %v", err)
+	}
+	if topicStatus != "queued" || pageCount != 0 {
+		t.Fatalf("expected queued topic without provider, got status=%q pages=%d", topicStatus, pageCount)
+	}
+}
+
+func TestGenerateReadingProcessesMissingTopicWhenProviderExists(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
 	defer conn.Close()
@@ -154,8 +180,8 @@ func TestGenerateReadingQueuesMissingTopicWhenProviderExists(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pages").Scan(&pageCount); err != nil {
 		t.Fatalf("count pages: %v", err)
 	}
-	if topicStatus != "queued" || pageCount != 0 {
-		t.Fatalf("expected queued topic without inline pages, got status=%q pages=%d", topicStatus, pageCount)
+	if topicStatus != "active" || pageCount != 1 {
+		t.Fatalf("expected active topic with inline pages, got status=%q pages=%d", topicStatus, pageCount)
 	}
 }
 
@@ -327,8 +353,11 @@ func TestTopicsPageListsRequestedTopicsWithStatus(t *testing.T) {
 	if !strings.Contains(body, `failed`) {
 		t.Fatalf("expected failed status:\n%s", body)
 	}
-	if !strings.Contains(body, `href="/topics/sqlite/evaluations"`) {
-		t.Fatalf("expected evaluations link:\n%s", body)
+	if strings.Contains(body, `>Evaluations<`) {
+		t.Fatalf("did not expect separate evaluations link:\n%s", body)
+	}
+	if strings.Count(body, `href="/topics/sqlite/evaluations"`) < 2 {
+		t.Fatalf("expected linked accepted and evaluated counts:\n%s", body)
 	}
 }
 

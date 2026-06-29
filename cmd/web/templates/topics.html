@@ -77,12 +77,11 @@
         {{range .Topics}}
         <tr>
           <td>
-            <a href="/{{.Slug}}">{{.Name}}</a><br>
-            <a href="/topics/{{.Slug}}/evaluations">Evaluations</a>
+            <a href="/{{.Slug}}">{{.Name}}</a>
           </td>
           <td class="status">{{.Status}}</td>
-          <td>{{.AcceptedCount}}</td>
-          <td>{{.EvaluatedCount}}</td>
+          <td><a href="/topics/{{.Slug}}/evaluations">{{.AcceptedCount}}</a></td>
+          <td><a href="/topics/{{.Slug}}/evaluations">{{.EvaluatedCount}}</a></td>
         </tr>
         {{end}}
       </tbody>

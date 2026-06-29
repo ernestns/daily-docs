@@ -71,15 +71,16 @@ When a user requests a missing topic:
 ```text
 GET /{topic}
   -> create queued topic
-  -> show queued state
+  -> attempt processing when allowed
+  -> show reading or queued state
 ```
 
-The UI should make it clear that the request is enqueued. Topic processing happens when someone clicks the process action.
+The UI should make it clear when the request remains queued. A process action is available for queued topics.
 
-Manual processing flow:
+Processing flow:
 
 ```text
-POST /process-topic
+request or POST /process-topic
   -> find oldest queued topic
   -> stop if 20 topics have been processed today
   -> run search pipeline

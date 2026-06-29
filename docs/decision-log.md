@@ -79,7 +79,8 @@ Implications:
 
 - Missing-topic search should offer a topic request.
 - The request is visible as queued.
-- A public process action handles queued topics.
+- The request path attempts processing immediately when allowed.
+- A public process action handles topics that remain queued.
 - Evaluated search results are stored, and accepted results become active pages.
 - There is no manual activation gate in the MVP.
 - Existing documentation URL submission, source, candidate, and admin activation paths are retired.
@@ -109,16 +110,16 @@ Implications:
 - Fall back to deterministic ranking when `OPENAI_API_KEY` is not configured.
 - AI summaries, quizzes, tagging, and quality review are future features, not MVP requirements.
 
-### Process Queued Topics Manually
+### Process Topic Requests With Manual Fallback
 
-Decision: the MVP exposes a public process action that processes the oldest queued topic up to a daily cap.
+Decision: the MVP attempts to process a newly requested topic immediately and exposes a public process action for topics that remain queued.
 
-Reason: manual processing keeps the system explicit and avoids a background worker. A daily cap directly controls cost and abuse.
+Reason: immediate processing gives the expected user experience for new requests. The manual action keeps existing queued topics recoverable without adding a background worker. A daily cap directly controls cost and abuse.
 
 Implications:
 
-- Missing-topic requests only enqueue.
-- The process action owns Tavily/OpenAI processing.
+- Missing-topic requests enqueue, then attempt processing.
+- The process action also runs Tavily/OpenAI processing.
 - Process at most 20 topics per UTC day.
 - If the daily cap has been reached, keep remaining topics queued.
 - The UI should show that the request has been enqueued and can be processed.

@@ -62,6 +62,7 @@ func (a app) handleMissingTopic(w http.ResponseWriter, r *http.Request, topic st
 		return
 	}
 
+	a.processNextQueuedTopic(r.Context())
 	renderTemplate(w, queuedTopicTemplate, queued)
 }
 
@@ -170,6 +171,7 @@ func (a app) generateReadingHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
+		a.processNextQueuedTopic(r.Context())
 		http.Redirect(w, r, "/"+queued.Slug, http.StatusSeeOther)
 		return
 	}
