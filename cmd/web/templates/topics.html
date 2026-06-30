@@ -50,6 +50,13 @@
     .status {
       text-transform: capitalize;
     }
+    .count-cell {
+      padding: 0;
+    }
+    .count-cell a {
+      display: block;
+      padding: 0.75rem;
+    }
     a {
       color: #1f2933;
     }
@@ -80,8 +87,8 @@
             <a href="/{{.Slug}}">{{.Name}}</a>
           </td>
           <td class="status">{{.StatusLabel}}</td>
-          <td><a href="/topics/{{.Slug}}/evaluations">{{.AcceptedCount}}</a></td>
-          <td><a href="/topics/{{.Slug}}/evaluations">{{.EvaluatedCount}}</a></td>
+          <td class="count-cell"><a href="/topics/{{.Slug}}/evaluations">{{.AcceptedCount}}</a></td>
+          <td class="count-cell"><a href="/topics/{{.Slug}}/evaluations">{{.EvaluatedCount}}</a></td>
         </tr>
         {{end}}
       </tbody>

@@ -11,7 +11,7 @@ import (
 	"github.com/ernestns/daily-docs/internal/topicsearch"
 )
 
-func TestHomePageListsTopics(t *testing.T) {
+func TestHomePageLinksToAllTopics(t *testing.T) {
 	ctx := context.Background()
 	conn := openWebTestDB(t, ctx)
 	defer conn.Close()
@@ -24,8 +24,14 @@ func TestHomePageListsTopics(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
-	if !strings.Contains(response.Body.String(), `href="/sqlite"`) {
-		t.Fatalf("expected sqlite topic link in home page:\n%s", response.Body.String())
+	if !strings.Contains(response.Body.String(), `One reading per topic per day.`) {
+		t.Fatalf("expected product description in home page:\n%s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `href="/topics"`) {
+		t.Fatalf("expected all topics link in home page:\n%s", response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), `href="/sqlite"`) {
+		t.Fatalf("did not expect topic catalog on home page:\n%s", response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), `Submit documentation`) {
 		t.Fatalf("did not expect documentation submission copy on home page:\n%s", response.Body.String())
@@ -476,6 +482,9 @@ func TestTopicsPageListsRequestedTopicsWithStatus(t *testing.T) {
 	}
 	if strings.Count(body, `href="/topics/sqlite/evaluations"`) < 2 {
 		t.Fatalf("expected linked accepted and evaluated counts:\n%s", body)
+	}
+	if strings.Count(body, `class="count-cell"`) < 2 {
+		t.Fatalf("expected accepted and evaluated cells to be clickable:\n%s", body)
 	}
 }
 

@@ -116,7 +116,7 @@
   <main>
     <section>
       <h1>DailyDocs</h1>
-      <p>One documentation link per topic per day.</p>
+      <p>One reading per topic per day.</p>
       <form method="get" action="/read" id="topic-form">
         <div class="topic-lookup">
           <input
@@ -135,11 +135,6 @@
         <button type="submit" id="topic-button">View Reading</button>
       </form>
       <p class="lookup-status" id="topic-status"></p>
-      {{if .Topics}}
-      <ul>
-        {{range .Topics}}<li><a href="/{{.Slug}}">{{.Name}}</a></li>{{end}}
-      </ul>
-      {{end}}
       <p><a href="/topics">All topics</a></p>
     </section>
   </main>
